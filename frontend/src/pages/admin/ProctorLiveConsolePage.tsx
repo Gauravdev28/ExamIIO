@@ -15,10 +15,11 @@ import {
   Send,
   X,
   Info,
-  CheckCircle
+  CheckCircle,
+  RotateCcw,
 } from 'lucide-react';
 import { InvigilationAPI } from '../../api/invigilation';
-import { TriageCandidate, ProctorIntervention, ProctorChatMessage } from '../../types/invigilation';
+import { TriageCandidate, ProctorIntervention, ProctorChatMessage, ReattemptReason } from '../../types/invigilation';
 import { RiskBand } from '../../types/proctoring';
 
 export const ProctorLiveConsolePage: React.FC = () => {
@@ -44,6 +45,12 @@ export const ProctorLiveConsolePage: React.FC = () => {
   const [terminateJustification, setTerminateJustification] = useState('');
   const [terminateInternalNotes, setTerminateInternalNotes] = useState('');
 
+  const [showReattemptModal, setShowReattemptModal] = useState(false);
+  const [reattemptReason, setReattemptReason] = useState<ReattemptReason>('ACCIDENTAL_VIOLATION');
+  const [reattemptNote, setReattemptNote] = useState('');
+  const [reattemptConfirmed, setReattemptConfirmed] = useState(false);
+  const [reattemptSubmitting, setReattemptSubmitting] = useState(false);
+
   const [actionLoading, setActionLoading] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -52,10 +59,41 @@ export const ProctorLiveConsolePage: React.FC = () => {
     if (!assessmentId) return;
     try {
       const data = await InvigilationAPI.getLiveRoster(assessmentId);
-      setCandidates(data.candidates);
+      setCandidates((prev) => {
+        // Stale protection: never let an older/stale roster poll resurrect a CANCELLED candidate to IN_PROGRESS
+        const terminalIds = new Set(
+          prev.filter((c) => c.status === 'CANCELLED' || c.is_disqualified).map((c) => c.attempt_id)
+        );
+        return data.candidates.map((c) => {
+          if (terminalIds.has(c.attempt_id) && c.status !== 'CANCELLED') {
+            const prevCandidate = prev.find((p) => p.attempt_id === c.attempt_id);
+            return {
+              ...c,
+              status: 'CANCELLED',
+              is_disqualified: true,
+              disqualification_reason: prevCandidate?.disqualification_reason || c.disqualification_reason,
+              termination_pending: false,
+            };
+          }
+          return c;
+        });
+      });
       if (selectedCandidate) {
         const updated = data.candidates.find(c => c.attempt_id === selectedCandidate.attempt_id);
-        if (updated) setSelectedCandidate(updated);
+        if (updated) {
+          setSelectedCandidate((prev) => {
+            if (prev && (prev.status === 'CANCELLED' || prev.is_disqualified) && updated.status !== 'CANCELLED') {
+              return {
+                ...updated,
+                status: 'CANCELLED',
+                is_disqualified: true,
+                disqualification_reason: prev.disqualification_reason || updated.disqualification_reason,
+                termination_pending: false,
+              };
+            }
+            return updated;
+          });
+        }
       } else if (data.candidates.length > 0) {
         setSelectedCandidate(data.candidates[0]);
       }
@@ -94,6 +132,45 @@ export const ProctorLiveConsolePage: React.FC = () => {
         try {
           const payload = JSON.parse(event.data);
           if (payload.type === 'PROCTOR_EVENT') {
+            const eventData = payload.data || {};
+            const eventAttemptId = eventData.attempt_id;
+            const isTerminalEvent =
+              eventData.status === 'CANCELLED' ||
+              eventData.type === 'TERMINATED' ||
+              eventData.event === 'TERMINATION_CONFIRMED';
+
+            if (eventAttemptId && isTerminalEvent) {
+              // Optimistically update candidate in roster immediately
+              setCandidates((prev) =>
+                prev.map((c) => {
+                  if (c.attempt_id === eventAttemptId) {
+                    return {
+                      ...c,
+                      status: 'CANCELLED',
+                      is_disqualified: true,
+                      disqualification_reason:
+                        eventData.disqualification_reason || eventData.justification || c.disqualification_reason,
+                      termination_pending: false,
+                    };
+                  }
+                  return c;
+                })
+              );
+              setSelectedCandidate((prev) => {
+                if (prev && prev.attempt_id === eventAttemptId) {
+                  return {
+                    ...prev,
+                    status: 'CANCELLED',
+                    is_disqualified: true,
+                    disqualification_reason:
+                      eventData.disqualification_reason || eventData.justification || prev.disqualification_reason,
+                    termination_pending: false,
+                  };
+                }
+                return prev;
+              });
+            }
+
             loadRoster();
             if (selectedCandidate) {
               loadAttemptDetails(selectedCandidate.attempt_id);
@@ -161,6 +238,11 @@ export const ProctorLiveConsolePage: React.FC = () => {
   const handleCancelTermination = async (attemptId?: string) => {
     const targetAttemptId = attemptId || selectedCandidate?.attempt_id;
     if (!targetAttemptId) return;
+    const target = candidates.find(c => c.attempt_id === targetAttemptId) || selectedCandidate;
+    if (target && (target.status === 'CANCELLED' || target.is_disqualified)) {
+      alert('Cannot rescue an already terminated or cancelled examination.');
+      return;
+    }
     setActionLoading(true);
     try {
       await InvigilationAPI.cancelTermination(targetAttemptId, 'Proctor intervened: Window focus loss acknowledged.');
@@ -176,6 +258,7 @@ export const ProctorLiveConsolePage: React.FC = () => {
   };
   const handleIssueWarning = async () => {
     if (!selectedCandidate || !warningMessage) return;
+    if (selectedCandidate.status === 'CANCELLED' || selectedCandidate.is_disqualified) return;
     setActionLoading(true);
     try {
       await InvigilationAPI.issueWarning(selectedCandidate.attempt_id, {
@@ -197,6 +280,7 @@ export const ProctorLiveConsolePage: React.FC = () => {
 
   const handleTogglePause = async () => {
     if (!selectedCandidate) return;
+    if (selectedCandidate.status === 'CANCELLED' || selectedCandidate.is_disqualified) return;
     setActionLoading(true);
     try {
       if (selectedCandidate.is_paused) {
@@ -215,6 +299,7 @@ export const ProctorLiveConsolePage: React.FC = () => {
 
   const handleRequestRoomScan = async () => {
     if (!selectedCandidate) return;
+    if (selectedCandidate.status === 'CANCELLED' || selectedCandidate.is_disqualified) return;
     setActionLoading(true);
     try {
       await InvigilationAPI.requestRoomScan(selectedCandidate.attempt_id, 'Please perform a 360 room scan.');
@@ -228,6 +313,7 @@ export const ProctorLiveConsolePage: React.FC = () => {
 
   const handleTerminateAttempt = async () => {
     if (!selectedCandidate || !terminateJustification) return;
+    if (selectedCandidate.status === 'CANCELLED' || selectedCandidate.is_disqualified) return;
     setActionLoading(true);
     try {
       await InvigilationAPI.terminateAttempt(selectedCandidate.attempt_id, {
@@ -247,6 +333,47 @@ export const ProctorLiveConsolePage: React.FC = () => {
     }
   };
 
+  const handleAuthorizeReattempt = async () => {
+    if (!selectedCandidate || !reattemptConfirmed) return;
+    if (reattemptReason === 'OTHER' && !reattemptNote.trim()) {
+      alert('An explanatory note is required when reason is OTHER.');
+      return;
+    }
+    setReattemptSubmitting(true);
+    try {
+      const resp = await InvigilationAPI.authorizeReattempt(selectedCandidate.attempt_id, {
+        reason: reattemptReason,
+        note: reattemptNote.trim(),
+      });
+      setShowReattemptModal(false);
+      setReattemptNote('');
+      setReattemptConfirmed(false);
+      setSelectedCandidate((prev) =>
+        prev
+          ? {
+              ...prev,
+              can_grant_reattempt: false,
+              reattempt: {
+                id: resp.authorization_id,
+                status: resp.status,
+                authorized_at: resp.authorized_at,
+                available_at: resp.available_at,
+                remaining_seconds: resp.remaining_seconds,
+                reason: resp.reason,
+                note: resp.note,
+                new_attempt_id: resp.new_attempt_id,
+              },
+            }
+          : null
+      );
+      loadRoster();
+    } catch (err: any) {
+      alert(err.response?.data?.error || err.response?.data?.note || err.response?.data?.detail || 'Failed to authorize reattempt');
+    } finally {
+      setReattemptSubmitting(false);
+    }
+  };
+
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCandidate || !chatInput.trim()) return;
@@ -257,6 +384,38 @@ export const ProctorLiveConsolePage: React.FC = () => {
     } catch (err) {
       console.error('Failed to send message:', err);
     }
+  };
+
+  const getViolationBadgeText = (candidate: TriageCandidate) => {
+    const reason = (candidate.disqualification_reason || candidate.termination_reason || '').toUpperCase();
+    if (reason.includes('TAB') || reason.includes('TAB_SWITCH')) {
+      return 'TERMINATED — TAB SWITCH';
+    }
+    if (reason.includes('FOCUS') || reason.includes('WINDOW_FOCUS')) {
+      return 'TERMINATED — FOCUS LOST';
+    }
+    if (reason.includes('FULLSCREEN')) {
+      return 'TERMINATED — FULLSCREEN EXIT';
+    }
+    if (reason.includes('COPY')) {
+      return 'TERMINATED — COPY ATTEMPT';
+    }
+    if (reason.includes('PASTE')) {
+      return 'TERMINATED — PASTE ATTEMPT';
+    }
+    if (reason.includes('CUT')) {
+      return 'TERMINATED — CUT ATTEMPT';
+    }
+    if (reason.includes('CONTEXT') || reason.includes('RIGHT_CLICK')) {
+      return 'TERMINATED — CONTEXT MENU';
+    }
+    if (reason.includes('KEYBOARD') || reason.includes('SHORTCUT')) {
+      return 'TERMINATED — SHORTCUT VIOLATION';
+    }
+    if (reason.includes('NAVIGATION') || reason.includes('HISTORY')) {
+      return 'TERMINATED — NAVIGATION VIOLATION';
+    }
+    return 'TERMINATED — DISQUALIFIED';
   };
 
   const getRiskBadge = (band: RiskBand) => {
@@ -360,15 +519,13 @@ export const ProctorLiveConsolePage: React.FC = () => {
                       <Clock className="w-3.5 h-3.5 text-slate-400" />
                       {formatTimer(c.remaining_seconds)}
                     </span>
-                    {c.termination_pending ? (
+                    {c.termination_pending && !c.is_disqualified && c.status !== 'CANCELLED' ? (
                       <span className="px-1.5 py-0.5 bg-red-950/80 text-red-400 border border-red-800/80 rounded text-2xs font-semibold">
                         TERMINATION PENDING ({formatTimer(c.termination_remaining_seconds ?? 0)})
                       </span>
                     ) : (c.is_disqualified || c.status === 'CANCELLED') ? (
                       <span className="px-1.5 py-0.5 bg-red-950 text-red-400 border border-red-800 rounded text-2xs font-bold">
-                        {(c.disqualification_reason || c.termination_reason || '').toUpperCase().includes('FOCUS')
-                          ? 'TERMINATED — FOCUS LOST'
-                          : 'DISQUALIFIED'}
+                        {getViolationBadgeText(c)}
                       </span>
                     ) : c.is_paused ? (
                       <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-2xs font-semibold">
@@ -421,9 +578,7 @@ export const ProctorLiveConsolePage: React.FC = () => {
                   </div>
                   <div>
                     <span className="text-xs font-bold text-red-400 tracking-wider uppercase">
-                      {(selectedCandidate.disqualification_reason || selectedCandidate.termination_reason || '').toUpperCase().includes('FOCUS')
-                        ? 'EXAMINATION TERMINATED — WINDOW FOCUS LOST'
-                        : 'EXAMINATION TERMINATED — DISQUALIFIED'}
+                      EXAMINATION {getViolationBadgeText(selectedCandidate)}
                     </span>
                     <p className="text-xs text-red-300/90 mt-0.5">
                       {selectedCandidate.disqualification_reason || 'Candidate disqualified due to examination integrity policy violation.'}
@@ -433,7 +588,7 @@ export const ProctorLiveConsolePage: React.FC = () => {
               )}
 
               {/* Pending Termination Alert Banner */}
-              {selectedCandidate.termination_pending && (
+              {selectedCandidate.termination_pending && !selectedCandidate.is_disqualified && selectedCandidate.status !== 'CANCELLED' && (
                 <div className="p-4 bg-red-950/40 border border-red-800/80 rounded-xl flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <div className="p-2.5 bg-red-900/40 border border-red-800 rounded-lg text-red-400 shrink-0">
@@ -486,9 +641,7 @@ export const ProctorLiveConsolePage: React.FC = () => {
                       <AlertTriangle className="w-8 h-8" />
                     </div>
                     <span className="text-base font-bold text-red-400">
-                      {(selectedCandidate.disqualification_reason || selectedCandidate.termination_reason || '').toUpperCase().includes('FOCUS')
-                        ? 'EXAMINATION TERMINATED — WINDOW FOCUS LOST'
-                        : 'EXAMINATION TERMINATED — DISQUALIFIED'}
+                      EXAMINATION {getViolationBadgeText(selectedCandidate)}
                     </span>
                     <span className="text-xs text-red-300/80 mt-1 font-mono">
                       Status: DISQUALIFIED
@@ -522,56 +675,116 @@ export const ProctorLiveConsolePage: React.FC = () => {
               </div>
 
               {/* Action Toolbar */}
-              <div className="grid grid-cols-4 gap-3">
-                <button
-                  onClick={() => setShowWarningModal(true)}
-                  disabled={actionLoading}
-                  className="flex items-center justify-center gap-2 py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded text-xs transition shadow-sm"
-                >
-                  <AlertTriangle className="w-4 h-4" />
-                  Issue Warning
-                </button>
+              {(() => {
+                const isCandidateTerminal = selectedCandidate.is_disqualified || selectedCandidate.status === 'CANCELLED';
+                return (
+                  <div className="flex flex-col gap-2">
+                    {isCandidateTerminal && (
+                      <>
+                        <div className="p-2 bg-red-950/40 border border-red-900/50 rounded text-2xs text-red-400 text-center font-medium">
+                          Attempt is terminal (CANCELLED / DISQUALIFIED). Proctor interventions are disabled.
+                        </div>
 
-                <button
-                  onClick={handleTogglePause}
-                  disabled={actionLoading}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-4 font-semibold rounded text-xs transition shadow-sm ${
-                    selectedCandidate.is_paused
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                  }`}
-                >
-                  {selectedCandidate.is_paused ? (
-                    <>
-                      <Play className="w-4 h-4" />
-                      Resume Attempt
-                    </>
-                  ) : (
-                    <>
-                      <Pause className="w-4 h-4" />
-                      Pause (Max 15m)
-                    </>
-                  )}
-                </button>
+                        {selectedCandidate.can_grant_reattempt && (
+                          <div className="flex items-center justify-between p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-lg shadow-sm">
+                            <div className="flex items-center gap-2">
+                              <RotateCcw className="w-4 h-4 text-emerald-400 shrink-0" />
+                              <div className="text-xs text-emerald-200">
+                                <span className="font-semibold text-white">Second Chance Available:</span> Candidate is eligible for one authorized reattempt.
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setReattemptConfirmed(false);
+                                setReattemptNote('');
+                                setReattemptReason('ACCIDENTAL_VIOLATION');
+                                setShowReattemptModal(true);
+                              }}
+                              disabled={actionLoading || reattemptSubmitting}
+                              className="flex items-center gap-1.5 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded text-xs transition shadow-sm shrink-0"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              Give Another Chance
+                            </button>
+                          </div>
+                        )}
 
-                <button
-                  onClick={handleRequestRoomScan}
-                  disabled={actionLoading}
-                  className="flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold rounded text-xs transition"
-                >
-                  <Camera className="w-4 h-4" />
-                  Request Room Scan
-                </button>
+                        {selectedCandidate.reattempt && (
+                          <div className="p-3 bg-slate-800/80 border border-slate-700 rounded-lg flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <RotateCcw className="w-4 h-4 text-emerald-400 shrink-0" />
+                              <div>
+                                <span className="font-semibold text-emerald-400">
+                                  Reattempt {selectedCandidate.reattempt.status === 'AUTHORIZED' ? 'Authorized (Preparing)' : 'Consumed'}
+                                </span>
+                                <span className="text-slate-400 text-[11px] ml-2">
+                                  Reason: {selectedCandidate.reattempt.reason}
+                                  {selectedCandidate.reattempt.note && ` — ${selectedCandidate.reattempt.note}`}
+                                </span>
+                              </div>
+                            </div>
+                            {selectedCandidate.reattempt.status === 'AUTHORIZED' && (
+                              <span className="font-mono text-amber-300 text-xs font-bold shrink-0">
+                                60s Server Window
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <div className="grid grid-cols-4 gap-3">
+                      <button
+                        onClick={() => setShowWarningModal(true)}
+                        disabled={actionLoading || isCandidateTerminal}
+                        className="flex items-center justify-center gap-2 py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded text-xs transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <AlertTriangle className="w-4 h-4" />
+                        Issue Warning
+                      </button>
 
-                <button
-                  onClick={() => setShowTerminateModal(true)}
-                  disabled={actionLoading}
-                  className="flex items-center justify-center gap-2 py-2.5 px-4 bg-red-600 hover:bg-red-500 text-white font-semibold rounded text-xs transition shadow-sm"
-                >
-                  <XCircle className="w-4 h-4" />
-                  Terminate Attempt
-                </button>
-              </div>
+                      <button
+                        onClick={handleTogglePause}
+                        disabled={actionLoading || isCandidateTerminal}
+                        className={`flex items-center justify-center gap-2 py-2.5 px-4 font-semibold rounded text-xs transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed ${
+                          selectedCandidate.is_paused
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                            : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                        }`}
+                      >
+                        {selectedCandidate.is_paused ? (
+                          <>
+                            <Play className="w-4 h-4" />
+                            Resume Attempt
+                          </>
+                        ) : (
+                          <>
+                            <Pause className="w-4 h-4" />
+                            Pause (Max 15m)
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={handleRequestRoomScan}
+                        disabled={actionLoading || isCandidateTerminal}
+                        className="flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold rounded text-xs transition disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Camera className="w-4 h-4" />
+                        Request Room Scan
+                      </button>
+
+                      <button
+                        onClick={() => setShowTerminateModal(true)}
+                        disabled={actionLoading || isCandidateTerminal}
+                        className="flex items-center justify-center gap-2 py-2.5 px-4 bg-red-600 hover:bg-red-500 text-white font-semibold rounded text-xs transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        Terminate Attempt
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
@@ -811,6 +1024,109 @@ export const ProctorLiveConsolePage: React.FC = () => {
                 className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-semibold rounded text-xs transition disabled:opacity-50"
               >
                 Confirm Termination
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reattempt Confirmation Modal */}
+      {showReattemptModal && selectedCandidate && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-emerald-500/40 rounded-lg max-w-md w-full p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <RotateCcw className="w-5 h-5 text-emerald-400" />
+                Give Another Chance
+              </h3>
+              <button onClick={() => setShowReattemptModal(false)} className="text-slate-400 hover:text-slate-200">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-800/60 rounded-md space-y-1.5 text-xs text-slate-300 border border-slate-700/60">
+              <div>
+                <span className="text-slate-400">Student:</span>{' '}
+                <strong className="text-white">{selectedCandidate.student_name}</strong> ({selectedCandidate.student_email})
+              </div>
+              <div>
+                <span className="text-slate-400">Original Attempt:</span>{' '}
+                <span className="text-rose-400 font-semibold">{selectedCandidate.status}</span>
+              </div>
+              {selectedCandidate.disqualification_reason && (
+                <div>
+                  <span className="text-slate-400">Reason:</span>{' '}
+                  <span className="text-amber-300 font-mono text-[11px]">{selectedCandidate.disqualification_reason}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Reason for Second Chance <span className="text-rose-400">*</span>
+                </label>
+                <select
+                  value={reattemptReason}
+                  onChange={(e) => setReattemptReason(e.target.value as ReattemptReason)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="ACCIDENTAL_VIOLATION">Accidental Violation (OS Blur / System Dialog)</option>
+                  <option value="TECHNICAL_PROBLEM">Technical Problem (Browser / Hardware Crash)</option>
+                  <option value="PROCTOR_DECISION">Proctor Decision (Reviewed and Cleared)</option>
+                  <option value="OTHER">Other (Specify Below)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Explanatory Note {reattemptReason === 'OTHER' && <span className="text-rose-400">* (Required)</span>}
+                </label>
+                <textarea
+                  value={reattemptNote}
+                  onChange={(e) => setReattemptNote(e.target.value)}
+                  placeholder={reattemptReason === 'OTHER' ? 'Detailed justification is required for other...' : 'Optional proctor notes for audit log...'}
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-2.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded text-xs text-emerald-200/90 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <p>
+                  <strong>Server Invariant:</strong> Authorizes exactly ONE new attempt. The cancelled attempt remains terminal and preserved for audit. A 60-second preparation delay is enforced by the server before the candidate can start.
+                </p>
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={reattemptConfirmed}
+                  onChange={(e) => setReattemptConfirmed(e.target.checked)}
+                  className="rounded bg-slate-950 border-slate-800 text-emerald-500 focus:ring-0"
+                />
+                <span className="text-xs text-slate-300">
+                  I confirm authorizing a second chance for this candidate.
+                </span>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowReattemptModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAuthorizeReattempt}
+                disabled={reattemptSubmitting || !reattemptConfirmed || (reattemptReason === 'OTHER' && !reattemptNote.trim())}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded text-xs transition flex items-center gap-1.5 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                {reattemptSubmitting ? 'Authorizing...' : 'Authorize Reattempt'}
               </button>
             </div>
           </div>

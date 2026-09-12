@@ -27,11 +27,13 @@ from apps.invigilation.serializers import (
     AcknowledgeWarningSerializer,
     CompleteRoomScanSerializer,
 )
+from django.utils import timezone
 from apps.invigilation.services import (
     ProctorRosterService,
     LiveInterventionService,
     ProctorTriageQueueService,
     ProctorChatService,
+    ProctorReattemptService,
 )
 
 
@@ -243,6 +245,42 @@ class ProctorInterventionHistoryView(APIView):
         ).select_related('proctor', 'student').order_by('issued_at')
         serializer = ProctorInterventionSerializer(interventions, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ProctorAuthorizeReattemptView(APIView):
+    """
+    Authorizes a single second-chance reattempt for a candidate whose prior attempt was CANCELLED.
+    POST /api/v1/proctor/attempts/<uuid:attempt_id>/reattempt/
+    """
+    permission_classes = [IsAuthenticated, IsProctorOrAdmin, HasAttemptInvigilationAccess]
+
+    def post(self, request, attempt_id):
+        reason = request.data.get('reason', '')
+        note = request.data.get('note', '')
+
+        auth = ProctorReattemptService.authorize_reattempt(
+            proctor=request.user,
+            attempt_id=attempt_id,
+            reason=reason,
+            note=note,
+            request=request
+        )
+
+        remaining_seconds = max(0, int((auth.available_at - timezone.now()).total_seconds()))
+
+        return Response({
+            "authorization_id": str(auth.id),
+            "original_attempt_id": str(auth.original_attempt_id),
+            "student_id": str(auth.student_id),
+            "assessment_id": str(auth.assessment_id),
+            "status": auth.status,
+            "authorized_at": auth.authorized_at.isoformat(),
+            "available_at": auth.available_at.isoformat(),
+            "remaining_seconds": remaining_seconds,
+            "reason": auth.reason,
+            "note": auth.note,
+            "new_attempt_id": str(auth.new_attempt_id) if auth.new_attempt_id else None
+        }, status=status.HTTP_201_CREATED)
 
 
 class ProctorChatHistoryView(APIView):

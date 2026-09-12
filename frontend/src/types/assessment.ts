@@ -1,4 +1,5 @@
 import { QuestionType, Difficulty } from './question';
+import { ReattemptInfo } from './invigilation';
 
 export type AssessmentStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 export type AssignmentStatus = 'ASSIGNED' | 'REVOKED';
@@ -195,6 +196,9 @@ export interface StudentAssessmentItem {
   attempts_used: number;
   is_eligible: boolean;
   active_attempt_id?: string | null;
+  reattempt_authorized?: boolean;
+  reattempt_available_at?: string | null;
+  reattempt_ready?: boolean;
 }
 
 export interface StudentSnapshotQuestion {
@@ -277,6 +281,8 @@ export interface StudentAttemptDetail {
   termination_remaining_seconds?: number | null;
   termination_reason?: string | null;
   server_time?: string | null;
+  state_version?: number;
+  reattempt?: ReattemptInfo | null;
   questions: StudentSnapshotQuestion[];
   answers: Record<string, StudentAnswerData>;
 }

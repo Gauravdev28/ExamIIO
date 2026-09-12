@@ -14,6 +14,7 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 
 from apps.accounts.models import AuditLog, User, Role, Section, StudentProfile
 from apps.accounts.services import AuditService, StudentService
+from apps.invigilation.models import ProctorReattemptAuthorization, ReattemptAuthStatus
 from apps.questions.models import QuestionVersion, VersionStatus, QuestionType
 from .models import (
     Assessment,
@@ -1227,8 +1228,170 @@ class AttemptService:
 
         now = timezone.now()
 
-        # Scheduling checks
-        if now < assessment.start_datetime:
+        # Check for proctor reattempt authorization
+        auth = ProctorReattemptAuthorization.objects.select_for_update().filter(
+            assessment=assessment,
+            student=student
+        ).first()
+
+        if auth is not None:
+            # ==================================================================
+            # REATTEMPT PATH
+            # ==================================================================
+            if auth.status == ReattemptAuthStatus.CONSUMED:
+                if not auth.new_attempt_id:
+                    raise DRFValidationError({
+                        "reattempt": "CORRUPTED_REATTEMPT_STATE: Reattempt authorization is marked consumed but no linked attempt exists."
+                    })
+                new_att = auth.new_attempt
+                if new_att.student_id != student.id or new_att.assessment_id != assessment.id:
+                    raise DRFValidationError({
+                        "reattempt": "CORRUPTED_REATTEMPT_STATE: Linked reattempt belongs to a different student or assessment."
+                    })
+
+                if new_att.status == AttemptStatus.IN_PROGRESS:
+                    AttemptTimerService.check_and_expire_attempt_if_needed(new_att)
+                    return new_att, False
+                elif new_att.status in (AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED):
+                    return new_att, False
+                elif new_att.status == AttemptStatus.CANCELLED:
+                    raise DRFValidationError({
+                        "status": "CANDIDATE_DISQUALIFIED: Disqualified attempts cannot be resumed or retaken."
+                    })
+                else:
+                    return new_att, False
+
+            elif auth.status == ReattemptAuthStatus.AUTHORIZED:
+                if auth.new_attempt_id is not None:
+                    raise DRFValidationError({
+                        "reattempt": "CORRUPTED_REATTEMPT_STATE: Authorization is AUTHORIZED but already has a linked attempt."
+                    })
+
+                # Server-authoritative 60-second preparation delay check
+                if now < auth.available_at:
+                    remaining_seconds = math.ceil((auth.available_at - now).total_seconds())
+                    raise DRFValidationError({
+                        "error": "REATTEMPT_PREPARING",
+                        "available_at": auth.available_at.isoformat(),
+                        "remaining_seconds": max(0, remaining_seconds)
+                    })
+
+                # Assessment schedule check
+                if now < assessment.start_datetime:
+                    raise DRFValidationError({
+                        "schedule": "START_REJECTED_TOO_EARLY: Assessment has not started yet.",
+                        "start_datetime": assessment.start_datetime.isoformat()
+                    })
+                if now >= assessment.end_datetime:
+                    raise DRFValidationError({
+                        "schedule": "START_REJECTED_TOO_LATE: Assessment deadline has passed.",
+                        "end_datetime": assessment.end_datetime.isoformat()
+                    })
+
+                # Verify Snapshot
+                try:
+                    snapshot = assessment.snapshot
+                except Exception:
+                    snapshot = None
+
+                if not snapshot or not snapshot.snapshot_questions.exists():
+                    raise DRFValidationError({
+                        "assessment": "Assessment snapshot is unavailable or unfinalized. Please contact the administrator."
+                    })
+
+                # Canonical MAX + 1 attempt number
+                max_num = TestAttempt.objects.filter(
+                    assessment=assessment,
+                    student=student
+                ).aggregate(
+                    models.Max("attempt_number")
+                )["attempt_number__max"] or 0
+                attempt_number = max_num + 1
+
+                # Authoritative Seed & Randomization
+                seed = RandomizationService.generate_seed()
+                raw_questions = list(snapshot.snapshot_questions.order_by('order'))
+                raw_q_ids = [sq.snapshot_question_id for sq in raw_questions]
+
+                question_order = RandomizationService.randomize_question_order(
+                    seed=seed,
+                    question_ids=raw_q_ids,
+                    randomize=assessment.randomize_questions
+                )
+
+                option_orders = {}
+                for sq in raw_questions:
+                    if sq.question_type in ['MCQ', 'MULTI_SELECT'] and sq.type_config:
+                        opts = sq.type_config.get('options', [])
+                        option_orders[sq.snapshot_question_id] = RandomizationService.randomize_options(
+                            seed=seed,
+                            question_id=sq.snapshot_question_id,
+                            options=opts,
+                            randomize=assessment.randomize_options
+                        )
+
+                started_at = now
+                expires_at = AttemptTimerService.compute_expiry(
+                    started_at=started_at,
+                    duration_minutes=assessment.duration_minutes,
+                    assessment_end=assessment.end_datetime
+                )
+
+                attempt = TestAttempt.objects.create(
+                    student=student,
+                    assessment=assessment,
+                    assessment_snapshot=snapshot,
+                    attempt_number=attempt_number,
+                    status=AttemptStatus.IN_PROGRESS,
+                    randomization_seed=seed,
+                    question_order=question_order,
+                    option_orders=option_orders,
+                    started_at=started_at,
+                    expires_at=expires_at
+                )
+
+                # Pre-create empty AttemptAnswer records for each snapshot question
+                for sq in raw_questions:
+                    AttemptAnswer.objects.create(
+                        attempt=attempt,
+                        snapshot_question=sq,
+                        question_id=sq.snapshot_question_id,
+                        question_type=sq.question_type,
+                        revision=1,
+                        is_answered=False
+                    )
+
+                # Atomically link and consume authorization
+                auth.new_attempt = attempt
+                auth.status = ReattemptAuthStatus.CONSUMED
+                auth.used_at = now
+                auth.save(update_fields=['new_attempt', 'status', 'used_at', 'updated_at'])
+
+                AuditService.log(
+                    action="REATTEMPT_STARTED",
+                    actor=student,
+                    target_type="TestAttempt",
+                    target_id=str(attempt.id),
+                    metadata={
+                        "assessment_id": str(assessment.id),
+                        "attempt_number": attempt_number,
+                        "authorization_id": str(auth.id),
+                        "original_attempt_id": str(auth.original_attempt_id),
+                        "expires_at": expires_at.isoformat()
+                    },
+                    request=request
+                )
+                return attempt, True
+            else:
+                raise DRFValidationError({
+                    "reattempt": f"UNKNOWN_AUTHORIZATION_STATUS: {auth.status}"
+                })
+        else:
+            # ==================================================================
+            # NORMAL PATH (Unchanged)
+            # ==================================================================
+            # Scheduling checks
+            if now < assessment.start_datetime:
                 raise DRFValidationError({
                     "schedule": "START_REJECTED_TOO_EARLY: Assessment has not started yet.",
                     "start_datetime": assessment.start_datetime.isoformat()

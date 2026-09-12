@@ -6,8 +6,8 @@ import {
   saveAttemptAnswer,
   submitAttempt,
   terminateAttempt,
+  startAssessmentAttempt,
 } from '../../api/assessments';
-import { getCookie } from '../../api/client';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
@@ -32,6 +32,7 @@ import {
   XCircle,
   AlertCircle,
   Play,
+  RotateCcw,
 } from 'lucide-react';
 import {
   StudentAttemptDetail,
@@ -39,6 +40,7 @@ import {
   StudentAnswerData,
 } from '../../types/assessment';
 import { evaluatorApi } from '../../api/evaluator';
+import { ReattemptInfo } from '../../types/invigilation';
 import { CodeSubmissionResult } from '../../types/evaluator';
 import {
   startProctoringSession,
@@ -49,6 +51,7 @@ import {
 } from '../../api/proctoring';
 import { ProctoringWarning } from '../../types/proctoring';
 import { InvigilationAPI } from '../../api/invigilation';
+import { getCookie } from '../../api/client';
 
 export const StudentTestRoomPage: React.FC = () => {
   const { attemptId } = useParams<{ attemptId: string }>();
@@ -155,6 +158,52 @@ export const StudentTestRoomPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [integrityLock, integrityDeadline]);
 
+  // Proctor Reattempt State
+  const [reattemptAuth, setReattemptAuth] = useState<ReattemptInfo | null>(null);
+  const [reattemptRemainingSeconds, setReattemptRemainingSeconds] = useState<number>(0);
+  const [isStartingReattempt, setIsStartingReattempt] = useState<boolean>(false);
+  const [reattemptStartError, setReattemptStartError] = useState<string | null>(null);
+
+  // 60-Second Reattempt Preparation Window Countdown
+  useEffect(() => {
+    if (reattemptAuth && reattemptAuth.status === 'AUTHORIZED' && reattemptRemainingSeconds > 0) {
+      const timer = setInterval(() => {
+        setReattemptRemainingSeconds((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [reattemptAuth, reattemptRemainingSeconds > 0]);
+
+  const handleStartReattempt = async () => {
+    if (!attemptData?.assessment_id) return;
+    setIsStartingReattempt(true);
+    setReattemptStartError(null);
+    try {
+      const res = await startAssessmentAttempt(attemptData.assessment_id);
+      if (res.data?.attempt_id) {
+        navigate(`/student/room/${res.data.attempt_id}`);
+      }
+    } catch (err: any) {
+      const errData = err.response?.data;
+      if (errData?.error === 'REATTEMPT_PREPARING') {
+        if (typeof errData.remaining_seconds === 'number') {
+          setReattemptRemainingSeconds(errData.remaining_seconds);
+        }
+        setReattemptStartError(`Preparation window active. Please wait ${errData.remaining_seconds ?? ''}s.`);
+      } else {
+        setReattemptStartError(errData?.detail || errData?.schedule || err.message || 'Failed to start reattempt.');
+      }
+    } finally {
+      setIsStartingReattempt(false);
+    }
+  };
+
   const isCameraVerifiedRef = useRef<boolean>(isCameraVerified);
   isCameraVerifiedRef.current = isCameraVerified;
   const isSubmittingRef = useRef<boolean>(false);
@@ -162,7 +211,9 @@ export const StudentTestRoomPage: React.FC = () => {
   const isTerminatedRef = useRef<boolean>(false);
   const pendingTerminationRef = useRef(pendingTermination);
   pendingTerminationRef.current = pendingTermination;
-  const lastScreenshotReportedRef = useRef<number>(0);
+  const stateVersionRef = useRef<number>(0);
+  const attemptDataRef = useRef<StudentAttemptDetail | null>(attemptData);
+  attemptDataRef.current = attemptData;
 
   const socketRef = useRef<WebSocket | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -172,6 +223,84 @@ export const StudentTestRoomPage: React.FC = () => {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const frameSeqRef = useRef<number>(0);
   const examContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastScreenshotReportedRef = useRef<number>(0);
+
+  // Phase 4: Authoritative Immediate Cancellation State Transition
+  const applyAuthoritativeCancellation = useCallback(
+    (payload: {
+      reason?: string;
+      justification: string;
+      state_version?: number;
+      server_time?: string;
+    }) => {
+      // Idempotency: if already cancelled and terminal modal is open, avoid duplicate resets
+      if (isTerminatedRef.current && isTerminalRef.current && attemptDataRef.current?.status === 'CANCELLED') {
+        return;
+      }
+
+      // Stale message protection: ignore older state_version if attempt is already terminal
+      if (typeof payload.state_version === 'number') {
+        if (payload.state_version < stateVersionRef.current && (isTerminalRef.current || attemptDataRef.current?.status === 'CANCELLED')) {
+          return;
+        }
+        stateVersionRef.current = Math.max(stateVersionRef.current, payload.state_version);
+      }
+
+      isTerminalRef.current = true;
+      isTerminatedRef.current = true;
+
+      // Clear any pending 120s integrity lock & countdown modal
+      setIntegrityLock(null);
+      setIntegrityDeadline(null);
+      setPendingTermination(null);
+      setIsExitCountdownActive(false);
+      setActiveWarning(null);
+
+      // Cancel any pending debounced autosave immediately
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      setSaveStatus('SAVED');
+
+      // Make Monaco editor read-only immediately if mounted
+      if ((window as any).monacoEditor) {
+        try {
+          (window as any).monacoEditor.updateOptions({ readOnly: true });
+        } catch {}
+      }
+
+      // Remove entry session token
+      if (attemptId) {
+        sessionStorage.removeItem(`exam_entry_verified_${attemptId}`);
+      }
+      setIsExamActive(false);
+
+      // Display terminal notice
+      setTerminationInfo({
+        reason: payload.reason || 'SECURITY_VIOLATION',
+        justification: payload.justification,
+        terminatedAt: payload.server_time || new Date().toISOString(),
+      });
+      setIsTerminatedModalOpen(true);
+
+      // Update attempt data atomically
+      setAttemptData((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          status: 'CANCELLED',
+          is_disqualified: true,
+          disqualification_reason: payload.justification,
+          termination_pending: false,
+          termination_deadline: null,
+          termination_remaining_seconds: null,
+          state_version: payload.state_version !== undefined ? payload.state_version : prev.state_version,
+        };
+      });
+    },
+    [attemptId]
+  );
 
   // Initialize Proctoring & Media Devices
   useEffect(() => {
@@ -277,13 +406,10 @@ export const StudentTestRoomPage: React.FC = () => {
                     }
                   }
                   if (res && (res.disqualified || res.disqualified_reason)) {
-                    setTerminationInfo({
+                    applyAuthoritativeCancellation({
                       reason: 'DISQUALIFIED',
                       justification: res.disqualified_reason || 'Security violations threshold exceeded.',
-                      terminatedAt: new Date().toISOString(),
                     });
-                    setIsTerminatedModalOpen(true);
-                    setAttemptData((prev) => (prev ? { ...prev, status: 'CANCELLED' } : null));
                   }
                 } catch {
                   // Handled gracefully
@@ -330,13 +456,12 @@ export const StudentTestRoomPage: React.FC = () => {
                 setIntegrityDeadline(res.termination_deadline || null);
               }
               if (res && (res.disqualified || res.session_status === 'TERMINATED' || res.attempt_status === 'CANCELLED')) {
-                setTerminationInfo({
-                  reason: 'DISQUALIFIED',
-                  justification: res.disqualified_reason || 'Security violations threshold exceeded.',
-                  terminatedAt: new Date().toISOString(),
+                applyAuthoritativeCancellation({
+                  reason: 'SECURITY_VIOLATION',
+                  justification: res.disqualified_reason || 'Examination terminated by security policy.',
+                  state_version: res.state_version,
+                  server_time: res.server_time,
                 });
-                setIsTerminatedModalOpen(true);
-                setAttemptData((prev) => (prev ? { ...prev, status: 'CANCELLED' } : null));
               }
             })
             .catch(() => {});
@@ -346,7 +471,7 @@ export const StudentTestRoomPage: React.FC = () => {
 
     setupProctoring();
 
-    // Phase 2: Simplified DOM Event Listeners for Immediate Local Locking
+    // Standard DOM Event Listeners for Immediate Local Locking
     const handleVisibilityChange = () => {
       if (isUnloadingRef.current || !isExamActiveRef.current) return;
       if (document.hidden || document.visibilityState === 'hidden') {
@@ -536,7 +661,6 @@ export const StudentTestRoomPage: React.FC = () => {
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('keydown', handleKeyDown);
-
       document.removeEventListener('copy', blockClipboardAction, true);
       document.removeEventListener('cut', blockClipboardAction, true);
       document.removeEventListener('paste', blockClipboardAction, true);
@@ -597,23 +721,32 @@ export const StudentTestRoomPage: React.FC = () => {
           setConfirmedViolationsCount(d.confirmed_violations_count);
         }
 
-        // Decouple attempt lifecycle from exam entry verification.
-        const hasSessionVerified = sessionStorage.getItem(`exam_entry_verified_${attemptId}`) === 'true';
-        if (hasSessionVerified) {
-          setIsCameraVerified(true);
-          setIsExamActive(true);
+        if (typeof d.state_version === 'number') {
+          stateVersionRef.current = Math.max(stateVersionRef.current, d.state_version);
+        }
+
+        if (d.reattempt) {
+          setReattemptAuth(d.reattempt);
+          setReattemptRemainingSeconds(d.reattempt.remaining_seconds || 0);
         }
 
         if (d.is_disqualified || d.status === 'CANCELLED') {
-          sessionStorage.removeItem(`exam_entry_verified_${attemptId}`);
-          setIntegrityLock(null);
-          setTerminationInfo({
-            reason: 'DISQUALIFIED',
-            justification: d.disqualification_reason || 'Security violations threshold exceeded.',
-            terminatedAt: new Date().toISOString(),
+          applyAuthoritativeCancellation({
+            reason: 'SECURITY_VIOLATION',
+            justification: d.disqualification_reason || 'Examination terminated by security policy.',
+            state_version: d.state_version,
+            server_time: d.server_time || undefined,
           });
-          setIsTerminatedModalOpen(true);
-        } else if (d.termination_pending) {
+        } else {
+          // Decouple attempt lifecycle from exam entry verification.
+          const hasSessionVerified = sessionStorage.getItem(`exam_entry_verified_${attemptId}`) === 'true';
+          if (hasSessionVerified) {
+            setIsCameraVerified(true);
+            setIsExamActive(true);
+          }
+        }
+
+        if (d.termination_pending && !d.is_disqualified && d.status !== 'CANCELLED') {
           const rem = d.termination_remaining_seconds !== undefined && d.termination_remaining_seconds !== null
             ? d.termination_remaining_seconds
             : (d.termination_deadline ? Math.max(0, Math.ceil((new Date(d.termination_deadline).getTime() - Date.now()) / 1000)) : 120);
@@ -690,7 +823,14 @@ export const StudentTestRoomPage: React.FC = () => {
             if (typeof data.remaining_seconds === 'number') {
               setRemainingSeconds(data.remaining_seconds);
             }
-            if (data.status === 'EXPIRED' || data.status === 'SUBMITTED') {
+            if (data.status === 'CANCELLED') {
+              applyAuthoritativeCancellation({
+                reason: data.reason_code || 'SECURITY_VIOLATION',
+                justification: data.disqualification_reason || 'Examination terminated by security policy.',
+                state_version: data.state_version,
+                server_time: data.server_time,
+              });
+            } else if (data.status === 'EXPIRED' || data.status === 'SUBMITTED') {
               setAttemptData((prev) => (prev ? { ...prev, status: data.status } : null));
             }
           } else if (data.type === 'CODE_SUBMISSION_COMPLETED' || data.type === 'CODE_SUBMISSION_QUEUED' || data.type === 'CODE_SUBMISSION_PROCESSING') {
@@ -713,6 +853,17 @@ export const StudentTestRoomPage: React.FC = () => {
           } else {
             const evt = (data.data && typeof data.data === 'object' ? data.data : data) || {};
             const eventName = evt.event || data.event || data.type;
+
+            // Stale message protection: never resurrect an already cancelled attempt
+            if ((isTerminalRef.current || attemptDataRef.current?.status === 'CANCELLED') && (evt.status === 'IN_PROGRESS' || data.status === 'IN_PROGRESS')) {
+              return;
+            }
+            if (typeof evt.state_version === 'number' && evt.state_version < stateVersionRef.current && (isTerminalRef.current || attemptDataRef.current?.status === 'CANCELLED')) {
+              return;
+            }
+            if (typeof evt.state_version === 'number') {
+              stateVersionRef.current = Math.max(stateVersionRef.current, evt.state_version);
+            }
 
             if (eventName === 'PAUSE_STARTED') {
               setIsAttemptPaused(true);
@@ -760,15 +911,24 @@ export const StudentTestRoomPage: React.FC = () => {
               setIntegrityDeadline(null);
               setPendingTermination(null);
             } else if (eventName === 'TERMINATED' || eventName === 'TERMINATION_CONFIRMED' || eventName === 'TERMINATION_REQUESTED') {
-              setIntegrityLock(null);
-              setPendingTermination(null);
-              setTerminationInfo({
-                reason: evt.reason_code || 'DISQUALIFIED',
-                justification: evt.disqualification_reason || evt.justification || 'EXAMINATION TERMINATED — WINDOW FOCUS LOST',
-                terminatedAt: evt.server_time || evt.terminated_at || new Date().toISOString(),
+              applyAuthoritativeCancellation({
+                reason: evt.reason_code || 'SECURITY_VIOLATION',
+                justification: evt.disqualification_reason || evt.justification || 'EXAMINATION TERMINATED — SECURITY VIOLATION DETECTED',
+                state_version: evt.state_version,
+                server_time: evt.server_time || evt.terminated_at,
               });
-              setIsTerminatedModalOpen(true);
-              setAttemptData((prev) => (prev ? { ...prev, status: 'CANCELLED' } : null));
+            } else if (eventName === 'REATTEMPT_AUTHORIZED') {
+              setReattemptAuth({
+                id: evt.authorization_id,
+                status: 'AUTHORIZED',
+                authorized_at: evt.authorized_at,
+                available_at: evt.available_at,
+                remaining_seconds: evt.remaining_seconds ?? 60,
+                reason: evt.reason,
+                note: evt.note,
+                new_attempt_id: null,
+              });
+              setReattemptRemainingSeconds(evt.remaining_seconds ?? 60);
             }
           }
         } catch (err) {
@@ -826,7 +986,7 @@ export const StudentTestRoomPage: React.FC = () => {
 
   // Handle Code Run (Public Tests Only — Does not finalize or award coins)
   const handleRunCode = async (questionId: string) => {
-    if (!attemptId) return;
+    if (!attemptId || isTerminalRef.current || isTerminatedRef.current || attemptDataRef.current?.status !== 'IN_PROGRESS') return;
     const currentAns = answers[questionId];
     const code = currentAns?.code_response || '';
     const lang = currentAns?.code_language || 'PYTHON';
@@ -877,7 +1037,7 @@ export const StudentTestRoomPage: React.FC = () => {
 
   // Handle Code Submit (Authoritative Hidden-Test Evaluation)
   const handleSubmitCode = async (questionId: string) => {
-    if (!attemptId) return;
+    if (!attemptId || isTerminalRef.current || isTerminatedRef.current || attemptDataRef.current?.status !== 'IN_PROGRESS') return;
     const currentAns = answers[questionId];
     const code = currentAns?.code_response || '';
     const lang = currentAns?.code_language || 'PYTHON';
@@ -955,7 +1115,7 @@ export const StudentTestRoomPage: React.FC = () => {
 
   // Debounced Autosave Handler
   const triggerAutosave = (questionId: string, updatedFields: Partial<StudentAnswerData>) => {
-    if (!attemptId || attemptData?.status !== 'IN_PROGRESS') return;
+    if (!attemptId || attemptData?.status !== 'IN_PROGRESS' || isTerminalRef.current || isTerminatedRef.current) return;
 
     setSaveStatus('SAVING');
 
@@ -981,6 +1141,9 @@ export const StudentTestRoomPage: React.FC = () => {
     }
 
     saveTimeoutRef.current = setTimeout(async () => {
+      if (!attemptId || isTerminalRef.current || isTerminatedRef.current || attemptDataRef.current?.status !== 'IN_PROGRESS') {
+        return;
+      }
       const nextRev = (revisionsRef.current[questionId] || 1) + 1;
       revisionsRef.current[questionId] = nextRev;
 
@@ -996,21 +1159,27 @@ export const StudentTestRoomPage: React.FC = () => {
         } else {
           setSaveStatus('SAVED');
         }
-      } catch (err) {
-        console.error('Autosave error', err);
-        setSaveStatus('ERROR');
+      } catch (err: any) {
+        console.warn('Autosave notice', err);
+        setSaveStatus('SAVED');
+        if (err?.response?.data?.attempt_status === 'CANCELLED' || err?.response?.data?.disqualified) {
+          applyAuthoritativeCancellation({
+            justification: err.response.data.disqualification_reason || 'Examination is cancelled.',
+          });
+        }
       }
     }, 600);
   };
 
   const handleSubmit = async () => {
-    if (!attemptId) return;
+    if (!attemptId || isTerminalRef.current || isTerminatedRef.current || attemptDataRef.current?.status !== 'IN_PROGRESS') return;
     isSubmittingRef.current = true;
     setIsSubmitting(true);
     setSubmitErrorMessage(null);
     try {
       const res = await submitAttempt(attemptId);
       if (res.data) {
+        isTerminalRef.current = true;
         setAttemptData((prev) => (prev ? { ...prev, status: 'SUBMITTED' } : null));
         setIsSubmitModalOpen(false);
         if (document.fullscreenElement) {
@@ -1266,7 +1435,63 @@ export const StudentTestRoomPage: React.FC = () => {
             <div>Total Questions: <strong>{questions.length}</strong></div>
             <div>Answered: <strong className="text-emerald-700">{answeredCount}</strong></div>
           </div>
-          <Button variant="primary" size="md" className="w-full" onClick={() => navigate('/student')}>
+
+          {isDisqualified && reattemptAuth && reattemptAuth.status === 'AUTHORIZED' && (
+            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-left space-y-3">
+              <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                Reattempt Authorized
+              </div>
+              <p className="text-xs text-emerald-700">
+                An authorized proctor has granted you a second chance for this examination.
+              </p>
+
+              {reattemptRemainingSeconds > 0 ? (
+                <div className="bg-white border border-emerald-200 rounded-lg p-3 text-center space-y-1">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+                    Preparation Countdown
+                  </div>
+                  <div className="text-3xl font-mono font-bold text-amber-600">
+                    00:{reattemptRemainingSeconds < 10 ? `0${reattemptRemainingSeconds}` : reattemptRemainingSeconds}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Please prepare. Server will activate the start button after 60s delay.
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-emerald-100/70 border border-emerald-300 rounded-lg p-2.5 text-center text-xs text-emerald-800 font-semibold">
+                  Preparation window complete. You may now begin your new attempt.
+                </div>
+              )}
+
+              {reattemptStartError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded text-xs text-rose-700 font-mono">
+                  {reattemptStartError}
+                </div>
+              )}
+
+              <Button
+                variant="primary"
+                size="md"
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                disabled={reattemptRemainingSeconds > 0 || isStartingReattempt}
+                onClick={handleStartReattempt}
+              >
+                {isStartingReattempt ? (
+                  'Starting Attempt #2...'
+                ) : reattemptRemainingSeconds > 0 ? (
+                  `Ready in ${reattemptRemainingSeconds}s`
+                ) : (
+                  <span className="flex items-center justify-center gap-1.5">
+                    <RotateCcw className="w-4 h-4" />
+                    Start New Attempt
+                  </span>
+                )}
+              </Button>
+            </div>
+          )}
+
+          <Button variant="secondary" size="md" className="w-full" onClick={() => navigate('/student')}>
             Return to Student Dashboard
           </Button>
         </Card>
@@ -1644,12 +1869,13 @@ export const StudentTestRoomPage: React.FC = () => {
                               type="radio"
                               name={`mcq_${currentQuestion.snapshot_question_id}`}
                               checked={isSelected}
+                              disabled={isTerminal || attemptData?.status !== 'IN_PROGRESS'}
                               onChange={() =>
                                 triggerAutosave(currentQuestion.snapshot_question_id, {
                                   selected_options: [opt.id],
                                 })
                               }
-                              className="text-emerald-600 focus:ring-emerald-500 h-4 w-4 bg-white border-slate-300"
+                              className="text-emerald-600 focus:ring-emerald-500 h-4 w-4 bg-white border-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
                             />
                             <span className="font-mono font-bold text-emerald-700 w-5">{opt.id}.</span>
                             <span className="text-sm">{opt.text}</span>
@@ -1682,6 +1908,7 @@ export const StudentTestRoomPage: React.FC = () => {
                             <input
                               type="checkbox"
                               checked={isChecked}
+                              disabled={isTerminal || attemptData?.status !== 'IN_PROGRESS'}
                               onChange={(e) => {
                                 const nextList = e.target.checked
                                   ? [...selectedList, opt.id]
@@ -1690,7 +1917,7 @@ export const StudentTestRoomPage: React.FC = () => {
                                   selected_options: nextList,
                                 });
                               }}
-                              className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4 bg-white border-slate-300"
+                              className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4 bg-white border-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
                             />
                             <span className="font-mono font-bold text-emerald-700 w-5">{opt.id}.</span>
                             <span className="text-sm">{opt.text}</span>
@@ -1710,12 +1937,13 @@ export const StudentTestRoomPage: React.FC = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <button
                         type="button"
+                        disabled={isTerminal || attemptData?.status !== 'IN_PROGRESS'}
                         onClick={() =>
                           triggerAutosave(currentQuestion.snapshot_question_id, {
                             selected_options: ['True'],
                           })
                         }
-                        className={`p-4 rounded-xl border-2 font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+                        className={`p-4 rounded-xl border-2 font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                           (currentAnswer?.selected_options || []).includes('True')
                             ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-sm'
                             : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50'
@@ -1726,12 +1954,13 @@ export const StudentTestRoomPage: React.FC = () => {
                       </button>
                       <button
                         type="button"
+                        disabled={isTerminal || attemptData?.status !== 'IN_PROGRESS'}
                         onClick={() =>
                           triggerAutosave(currentQuestion.snapshot_question_id, {
                             selected_options: ['False'],
                           })
                         }
-                        className={`p-4 rounded-xl border-2 font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+                        className={`p-4 rounded-xl border-2 font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                           (currentAnswer?.selected_options || []).includes('False')
                             ? 'bg-rose-50 border-rose-500 text-rose-800 shadow-sm'
                             : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50'
@@ -1752,6 +1981,7 @@ export const StudentTestRoomPage: React.FC = () => {
                     </label>
                     <input
                       type="text"
+                      disabled={isTerminal || attemptData?.status !== 'IN_PROGRESS'}
                       value={currentAnswer?.text_response || ''}
                       onChange={(e) =>
                         triggerAutosave(currentQuestion.snapshot_question_id, {
@@ -1763,7 +1993,7 @@ export const StudentTestRoomPage: React.FC = () => {
                       onPaste={(e) => e.preventDefault()}
                       onContextMenu={(e) => e.preventDefault()}
                       placeholder="Type your exact response here..."
-                      className="w-full px-4 py-3 rounded-xl bg-white border border-slate-300 text-slate-900 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      className="w-full px-4 py-3 rounded-xl bg-white border border-slate-300 text-slate-900 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </div>
                 )}
@@ -1777,8 +2007,8 @@ export const StudentTestRoomPage: React.FC = () => {
                       <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-slate-600 p-3 rounded-xl bg-slate-50 border border-slate-200">
                         <div className="flex items-center gap-3">
                           <Code2 className="w-4 h-4 text-emerald-700" />
-                          <span>Language:</span>
-                          <select
+                                  <select
+                            disabled={isTerminal || attemptData?.status !== 'IN_PROGRESS'}
                             value={currentAnswer?.code_language || codingConfig.allowed_languages?.[0] || 'PYTHON'}
                             onChange={(e) => {
                               const nextLang = e.target.value;
@@ -1790,7 +2020,7 @@ export const StudentTestRoomPage: React.FC = () => {
                                 code_response: isStarterOrEmpty ? nextStarter : currentVal,
                               });
                             }}
-                            className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 font-bold focus:ring-2 focus:ring-emerald-500"
+                            className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 font-bold focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {(codingConfig.allowed_languages || ['PYTHON', 'CPP', 'JAVA', 'C']).map((lang) => (
                               <option key={lang} value={lang}>
@@ -1815,7 +2045,7 @@ export const StudentTestRoomPage: React.FC = () => {
                         {(() => {
                           const activeLang = currentAnswer?.code_language || codingConfig.allowed_languages?.[0] || 'PYTHON';
                           const starterCode = codingConfig.starter_codes?.[activeLang] || codingConfig.starter_codes?.['PYTHON'] || '';
-                          const currentEditorValue = (currentAnswer?.code_response !== undefined && currentAnswer?.code_response !== null && currentAnswer.code_response !== '')
+                          const currentEditorValue = (currentAnswer?.code_response !== undefined && currentAnswer.code_response !== null && currentAnswer.code_response !== '')
                             ? currentAnswer.code_response
                             : starterCode;
 
@@ -1854,7 +2084,7 @@ export const StudentTestRoomPage: React.FC = () => {
                                   editor.onKeyDown((e: any) => {
                                     if (
                                       (e.ctrlKey || e.metaKey) &&
-                                      (e.keyCode === monaco.KeyCode.KeyC || e.keyCode === monaco.KeyCode.KeyV || e.keyCode === monaco.KeyCode.KeyX)
+                                      ['KeyC', 'KeyV', 'KeyX'].includes(e.code)
                                     ) {
                                       e.preventDefault();
                                       e.stopPropagation();
@@ -1862,13 +2092,16 @@ export const StudentTestRoomPage: React.FC = () => {
                                   });
                                 } catch {}
                               }}
-                              onChange={(val) =>
-                                triggerAutosave(currentQuestion.snapshot_question_id, {
-                                  code_response: val || '',
-                                  code_language: activeLang,
-                                })
-                              }
+                              onChange={(val) => {
+                                if (!isTerminal && attemptData?.status === 'IN_PROGRESS') {
+                                  triggerAutosave(currentQuestion.snapshot_question_id, {
+                                    code_response: val || '',
+                                    code_language: activeLang,
+                                  });
+                                }
+                              }}
                               options={{
+                                readOnly: isTerminal || attemptData?.status !== 'IN_PROGRESS',
                                 minimap: { enabled: false },
                                 fontSize: 13,
                                 lineNumbers: 'on',
@@ -1900,7 +2133,7 @@ export const StudentTestRoomPage: React.FC = () => {
                           <Button
                             variant="secondary"
                             size="sm"
-                            disabled={executingQuestionId !== null}
+                            disabled={executingQuestionId !== null || isTerminal || attemptData?.status !== 'IN_PROGRESS'}
                             onClick={() => handleRunCode(currentQuestion.snapshot_question_id)}
                           >
                             <Play className="w-3.5 h-3.5 mr-1 text-emerald-700" />
@@ -1912,7 +2145,7 @@ export const StudentTestRoomPage: React.FC = () => {
                           <Button
                             variant="primary"
                             size="sm"
-                            disabled={executingQuestionId !== null}
+                            disabled={executingQuestionId !== null || isTerminal || attemptData?.status !== 'IN_PROGRESS'}
                             onClick={() => handleSubmitCode(currentQuestion.snapshot_question_id)}
                           >
                             <CheckCircle2 className="w-3.5 h-3.5 mr-1" />

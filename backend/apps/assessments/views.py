@@ -632,6 +632,32 @@ class StudentAttemptDetailView(APIView):
         except Exception:
             pass
 
+        reattempt_data = None
+        try:
+            from apps.invigilation.models import ProctorReattemptAuthorization
+            reatt_auth = ProctorReattemptAuthorization.objects.filter(
+                original_attempt=attempt
+            ).first()
+            if not reatt_auth:
+                reatt_auth = ProctorReattemptAuthorization.objects.filter(
+                    assessment=attempt.assessment,
+                    student=attempt.student
+                ).first()
+            if reatt_auth:
+                rem_sec = max(0, math.ceil((reatt_auth.available_at - now).total_seconds())) if reatt_auth.available_at else 0
+                reattempt_data = {
+                    "id": str(reatt_auth.id),
+                    "status": reatt_auth.status,
+                    "authorized_at": reatt_auth.authorized_at.isoformat() if reatt_auth.authorized_at else None,
+                    "available_at": reatt_auth.available_at.isoformat() if reatt_auth.available_at else None,
+                    "remaining_seconds": rem_sec,
+                    "reason": reatt_auth.reason,
+                    "note": reatt_auth.note,
+                    "new_attempt_id": str(reatt_auth.new_attempt_id) if reatt_auth.new_attempt_id else None,
+                }
+        except Exception:
+            pass
+
         return APIResponse(
             data={
                 "attempt_id": str(attempt.id),
@@ -661,6 +687,7 @@ class StudentAttemptDetailView(APIView):
                 "termination_deadline": attempt.termination_deadline.isoformat() if attempt.termination_deadline else None,
                 "termination_remaining_seconds": max(0, int((attempt.termination_deadline - now).total_seconds())) if (attempt.termination_pending and attempt.termination_deadline) else None,
                 "termination_reason": attempt.termination_reason,
+                "reattempt": reattempt_data,
                 "server_time": now.isoformat(),
                 "questions": ordered_questions,
                 "answers": answers_map,

@@ -1,14 +1,14 @@
 import logging
 from datetime import timedelta
 from typing import Optional, List, Dict, Any, Tuple
-from django.db import transaction, models
+from django.db import transaction, models, IntegrityError
 from django.utils import timezone
 from django.core.exceptions import PermissionDenied, ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError, NotFound
 
 from apps.accounts.models import User, Role
 from apps.accounts.services import AuditService
-from apps.assessments.models import Assessment, TestAttempt, AttemptStatus
+from apps.assessments.models import Assessment, TestAttempt, AttemptStatus, AssessmentAssignment, AssignmentStatus
 from apps.assessments.services import AttemptTimerService
 from apps.proctoring.models import ProctoringSession, RiskBand
 from apps.invigilation.models import (
@@ -17,6 +17,9 @@ from apps.invigilation.models import (
     InterventionType,
     ProctorDutySession,
     ProctorChatMessage,
+    ProctorReattemptAuthorization,
+    ReattemptReason,
+    ReattemptAuthStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -764,6 +767,14 @@ class ProctorTriageQueueService:
             if p.event_type == InterventionType.PAUSE_STARTED and p.id not in ended_parent_ids:
                 active_pauses_by_attempt[p.attempt_id] = p
 
+        # Batch-fetch all reattempt authorizations for these attempts/students
+        auths = ProctorReattemptAuthorization.objects.filter(
+            assessment=assessment,
+            student__in=[att.student for att in attempts]
+        )
+        auth_by_orig_attempt = {a.original_attempt_id: a for a in auths}
+        auth_by_student = {a.student_id: a for a in auths}
+
         now = timezone.now()
         roster_items = []
 
@@ -785,6 +796,25 @@ class ProctorTriageQueueService:
 
             student = att.student
             profile = getattr(student, 'student_profile', None)
+
+            auth = auth_by_orig_attempt.get(att.id) or auth_by_student.get(student.id)
+            can_grant_reattempt = (
+                att.status == AttemptStatus.CANCELLED
+                and auth is None
+            )
+            reattempt_info = None
+            if auth:
+                rem_sec = max(0, int((auth.available_at - now).total_seconds())) if auth.available_at else 0
+                reattempt_info = {
+                    "id": str(auth.id),
+                    "status": auth.status,
+                    "authorized_at": auth.authorized_at.isoformat() if auth.authorized_at else None,
+                    "available_at": auth.available_at.isoformat() if auth.available_at else None,
+                    "remaining_seconds": rem_sec,
+                    "reason": auth.reason,
+                    "note": auth.note,
+                    "new_attempt_id": str(auth.new_attempt_id) if auth.new_attempt_id else None,
+                }
 
             termination_rem_sec = max(0, int((att.termination_deadline - now).total_seconds())) if (att.termination_pending and att.termination_deadline) else None
 
@@ -812,6 +842,8 @@ class ProctorTriageQueueService:
                 "termination_deadline": att.termination_deadline.isoformat() if att.termination_deadline else None,
                 "termination_remaining_seconds": termination_rem_sec,
                 "termination_reason": att.termination_reason,
+                "can_grant_reattempt": can_grant_reattempt,
+                "reattempt": reattempt_info,
                 "server_time": now.isoformat(),
             })
 
@@ -931,4 +963,154 @@ class InvigilationRetentionService:
             "interventions_purged": interventions_purged,
             "chat_purged": chat_purged,
         }
+
+
+# ==============================================================================
+# 6. Proctor Reattempt / Second-Chance Service
+# ==============================================================================
+
+class ProctorReattemptService:
+    """
+    Authoritative service governing proctor-granted reattempts / second-chances.
+    Enforces that an original CANCELLED attempt can spawn at most one reattempt authorization
+    per (student, assessment), serialized via AssessmentAssignment row lock.
+    """
+
+    @classmethod
+    @transaction.atomic
+    def authorize_reattempt(
+        cls,
+        proctor: User,
+        attempt_id: str,
+        reason: str,
+        note: str = '',
+        request=None
+    ) -> ProctorReattemptAuthorization:
+        # 1. Fetch target attempt
+        target_attempt = TestAttempt.objects.select_related('student', 'assessment').filter(id=attempt_id).first()
+        if not target_attempt:
+            raise NotFound("Test attempt not found.")
+
+        # 2. Lock parent AssessmentAssignment first (consistent parent-row lock ordering)
+        try:
+            assignment = AssessmentAssignment.objects.select_for_update().get(
+                assessment=target_attempt.assessment,
+                student=target_attempt.student
+            )
+        except AssessmentAssignment.DoesNotExist:
+            raise DRFValidationError({"error": "Assessment assignment not found for this candidate."})
+
+        # 3. Lock target TestAttempt second
+        target_attempt = TestAttempt.objects.select_for_update().get(id=attempt_id)
+
+        # 4. Verify target attempt belongs to that assignment
+        if target_attempt.student_id != assignment.student_id or target_attempt.assessment_id != assignment.assessment_id:
+            raise DRFValidationError({"error": "Attempt does not match candidate assessment assignment."})
+
+        if assignment.status != AssignmentStatus.ASSIGNED:
+            raise DRFValidationError({"error": "Candidate assessment assignment is revoked or inactive."})
+
+        # 5. Verify target status is strictly CANCELLED
+        if target_attempt.status != AttemptStatus.CANCELLED:
+            raise DRFValidationError({"error": "Only CANCELLED attempts are eligible for reattempt."})
+
+        # 6. Verify target is not already a reattempt (prevent chaining)
+        if hasattr(target_attempt, 'reattempt_origin') and target_attempt.reattempt_origin is not None:
+            raise DRFValidationError({"error": "A reattempt cannot be authorized for an attempt that is already a reattempt."})
+
+        # 7. Check if an authorization already exists for this (student, assessment)
+        if ProctorReattemptAuthorization.objects.filter(
+            student=target_attempt.student,
+            assessment=target_attempt.assessment
+        ).exists():
+            raise DRFValidationError({"error": "A reattempt has already been authorized for this candidate on this assessment."})
+
+        # 8. Validate reason
+        if reason not in ReattemptReason.values:
+            raise DRFValidationError({"reason": f"Invalid reason code '{reason}'. Valid choices: {ReattemptReason.values}"})
+
+        # If OTHER: require note
+        if reason == ReattemptReason.OTHER and not note.strip():
+            raise DRFValidationError({"note": "An explanatory note is required when reason is OTHER."})
+
+        now = timezone.now()
+        available_at = now + timedelta(seconds=60)
+
+        # 9. Create ProctorReattemptAuthorization
+        try:
+            auth = ProctorReattemptAuthorization.objects.create(
+                original_attempt=target_attempt,
+                new_attempt=None,
+                student=target_attempt.student,
+                assessment=target_attempt.assessment,
+                authorized_by=proctor,
+                reason=reason,
+                note=note.strip(),
+                authorized_at=now,
+                available_at=available_at,
+                status=ReattemptAuthStatus.AUTHORIZED
+            )
+        except IntegrityError:
+            raise DRFValidationError({"error": "A reattempt has already been authorized for this candidate on this assessment."})
+
+        # 10. Record immutable ProctorIntervention
+        ProctorIntervention.objects.create(
+            attempt=target_attempt,
+            proctor=proctor,
+            student=target_attempt.student,
+            event_type=InterventionType.REATTEMPT_AUTHORIZED,
+            reason_code=reason,
+            reason_text=note.strip() or f"Reattempt authorized by {proctor.email} ({reason}).",
+            internal_notes=note.strip(),
+            metadata={
+                "authorization_id": str(auth.id),
+                "authorized_at": now.isoformat(),
+                "available_at": available_at.isoformat(),
+                "reason": reason
+            }
+        )
+
+        # 11. Audit log
+        AuditService.log(
+            action="PROCTOR_REATTEMPT_AUTHORIZED",
+            actor=proctor,
+            target_type="TestAttempt",
+            target_id=str(target_attempt.id),
+            metadata={
+                "assessment_id": str(target_attempt.assessment_id),
+                "student_id": str(target_attempt.student_id),
+                "authorization_id": str(auth.id),
+                "reason": reason,
+                "note": note.strip(),
+                "available_at": available_at.isoformat()
+            },
+            request=request
+        )
+
+        # 12. WebSocket dispatch on commit
+        student_profile = getattr(target_attempt.student, 'student_profile', None)
+        student_name = (getattr(student_profile, 'full_name', '') if student_profile else '') or target_attempt.student.email
+        payload = {
+            "event": "REATTEMPT_AUTHORIZED",
+            "authorization_id": str(auth.id),
+            "original_attempt_id": str(target_attempt.id),
+            "assessment_id": str(target_attempt.assessment_id),
+            "student_id": str(target_attempt.student_id),
+            "student_name": student_name,
+            "authorized_at": now.isoformat(),
+            "available_at": available_at.isoformat(),
+            "remaining_seconds": 60,
+            "reason": reason,
+            "note": note.strip(),
+            "new_attempt_id": None,
+            "server_time": now.isoformat()
+        }
+        transaction.on_commit(lambda: cls._dispatch_broadcast(target_attempt, payload))
+
+        return auth
+
+    @classmethod
+    def _dispatch_broadcast(cls, target_attempt: TestAttempt, payload: dict):
+        LiveInterventionService._dispatch_websocket_event(f"attempt_{target_attempt.id}", payload)
+        LiveInterventionService._dispatch_websocket_event(f"proctor_assessment_{target_attempt.assessment_id}", payload)
 

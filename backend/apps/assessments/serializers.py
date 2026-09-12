@@ -399,6 +399,9 @@ class StudentAssessmentListSerializer(serializers.ModelSerializer):
     attempts_used = serializers.SerializerMethodField()
     active_attempt_id = serializers.SerializerMethodField()
     is_eligible = serializers.SerializerMethodField()
+    reattempt_authorized = serializers.SerializerMethodField()
+    reattempt_available_at = serializers.SerializerMethodField()
+    reattempt_ready = serializers.SerializerMethodField()
 
     class Meta:
         model = Assessment
@@ -415,7 +418,25 @@ class StudentAssessmentListSerializer(serializers.ModelSerializer):
             'attempts_used',
             'is_eligible',
             'active_attempt_id',
+            'reattempt_authorized',
+            'reattempt_available_at',
+            'reattempt_ready',
         ]
+
+    def _get_reattempt_auth(self, obj: Assessment):
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return None
+        if not hasattr(self, '_reattempt_auth_cache'):
+            self._reattempt_auth_cache = {}
+        if obj.id not in self._reattempt_auth_cache:
+            from apps.invigilation.models import ProctorReattemptAuthorization, ReattemptAuthStatus
+            self._reattempt_auth_cache[obj.id] = ProctorReattemptAuthorization.objects.filter(
+                assessment=obj,
+                student=request.user,
+                status=ReattemptAuthStatus.AUTHORIZED
+            ).first()
+        return self._reattempt_auth_cache[obj.id]
 
     def get_attempts_used(self, obj: Assessment):
         user = self.context.get('request').user
@@ -430,6 +451,20 @@ class StudentAssessmentListSerializer(serializers.ModelSerializer):
         user = self.context.get('request').user
         used = obj.attempts.filter(student=user).count()
         return used < obj.attempt_limit
+
+    def get_reattempt_authorized(self, obj: Assessment):
+        auth = self._get_reattempt_auth(obj)
+        return auth is not None
+
+    def get_reattempt_available_at(self, obj: Assessment):
+        auth = self._get_reattempt_auth(obj)
+        return auth.available_at.isoformat() if auth else None
+
+    def get_reattempt_ready(self, obj: Assessment):
+        auth = self._get_reattempt_auth(obj)
+        if not auth:
+            return False
+        return timezone.now() >= auth.available_at
 
 
 class StudentAttemptAnswerSerializer(serializers.ModelSerializer):

@@ -9,6 +9,7 @@ from apps.invigilation.views import (
     ProctorTerminateAttemptView,
     ProctorCancelTerminationView,
     ProctorInterventionHistoryView,
+    ProctorAuthorizeReattemptView,
     ProctorChatHistoryView,
     StudentAcknowledgeWarningView,
     StudentCompleteRoomScanView,
@@ -27,6 +28,7 @@ urlpatterns = [
     path('proctor/attempts/<uuid:attempt_id>/cancel-termination/', ProctorCancelTerminationView.as_view(), name='proctor-cancel-termination'),
     path('invigilation/attempts/<uuid:attempt_id>/cancel-termination/', ProctorCancelTerminationView.as_view(), name='invigilation-cancel-termination'),
     path('proctor/attempts/<uuid:attempt_id>/interventions/', ProctorInterventionHistoryView.as_view(), name='proctor-intervention-history'),
+    path('proctor/attempts/<uuid:attempt_id>/reattempt/', ProctorAuthorizeReattemptView.as_view(), name='proctor-authorize-reattempt'),
     path('proctor/attempts/<uuid:attempt_id>/chat/', ProctorChatHistoryView.as_view(), name='proctor-chat'),
 
     # Student-Facing Intervention Endpoints

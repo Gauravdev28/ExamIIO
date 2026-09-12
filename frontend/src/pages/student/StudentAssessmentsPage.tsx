@@ -13,9 +13,12 @@ import {
   CheckCircle2,
   Award,
   ArrowLeft,
+  BookOpen,
+  Shield,
+  X,
+  RotateCcw,
 } from 'lucide-react';
 import { StudentAssessmentItem } from '../../types/assessment';
-import { SecureBrowserLaunchModal } from '../../components/student/SecureBrowserLaunchModal';
 
 export const StudentAssessmentsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -214,6 +217,17 @@ export const StudentAssessmentsPage: React.FC = () => {
                       <Play className="w-4 h-4 mr-2" />
                       Start Assessment
                     </Button>
+                  ) : isActive && a.reattempt_authorized ? (
+                    <Button
+                      variant="primary"
+                      size="md"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                      isLoading={isStartingId === a.id}
+                      onClick={() => handleStartAttempt(a)}
+                    >
+                      <RotateCcw className="w-4 h-4 mr-2" />
+                      Start Reattempt (Second Chance)
+                    </Button>
                   ) : isUpcoming ? (
                     <Button variant="secondary" size="md" className="w-full" disabled>
                       <Clock className="w-4 h-4 mr-2" />
@@ -242,13 +256,80 @@ export const StudentAssessmentsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Secure Browser Installation & Launch UX Modal */}
-      <SecureBrowserLaunchModal
-        isOpen={Boolean(pendingStartAssessment)}
-        onClose={() => setPendingStartAssessment(null)}
-        assessment={pendingStartAssessment}
-        onStandardFallbackStart={handleConfirmStartAttempt}
-      />
+      {/* Start Examination Confirmation Modal */}
+      {pendingStartAssessment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <Card className="max-w-md w-full p-6 space-y-5 border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Start Examination</h3>
+                  <p className="text-xs text-slate-500">Confirm test session initialization</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPendingStartAssessment(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                disabled={Boolean(isStartingId)}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="font-bold text-sm text-slate-900">{pendingStartAssessment.title}</div>
+                {pendingStartAssessment.description && (
+                  <p className="text-slate-600 line-clamp-2">{pendingStartAssessment.description}</p>
+                )}
+                <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-slate-200 font-mono text-[11px] text-slate-700">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Duration: <strong>{pendingStartAssessment.duration_minutes} Mins</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Points: <strong>{pendingStartAssessment.total_points}</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 space-y-1.5">
+                <div className="font-semibold flex items-center gap-1.5 text-amber-950">
+                  <Shield className="w-4 h-4 text-amber-700" />
+                  <span>Exam Integrity Notice</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-amber-800">
+                  Your examination timer will begin immediately upon starting. Fullscreen mode and continuous AI proctoring will be monitored throughout your attempt.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setPendingStartAssessment(null)}
+                disabled={Boolean(isStartingId)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                isLoading={isStartingId === pendingStartAssessment.id}
+                onClick={handleConfirmStartAttempt}
+              >
+                <Play className="w-3.5 h-3.5 mr-1.5" />
+                <span>Confirm & Enter Room</span>
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

@@ -19,6 +19,7 @@ class InterventionType(models.TextChoices):
     TERMINATION_CONFIRMED = 'TERMINATION_CONFIRMED', 'Termination Confirmed'
     TERMINATION_PENDING = 'TERMINATION_PENDING', 'Termination Pending'
     TERMINATION_CANCELLED = 'TERMINATION_CANCELLED', 'Termination Cancelled'
+    REATTEMPT_AUTHORIZED = 'REATTEMPT_AUTHORIZED', 'Reattempt Authorized'
 
 
 class ImmutableInterventionQuerySet(models.QuerySet):
@@ -312,3 +313,76 @@ class ProctorChatMessage(UUIDModel, TimeStampedModel):
         Explicit, authorized internal instance deletion callable strictly by Phase 9.
         """
         return super().delete()
+
+
+class ReattemptReason(models.TextChoices):
+    ACCIDENTAL_VIOLATION = 'ACCIDENTAL_VIOLATION', 'Accidental Violation'
+    TECHNICAL_PROBLEM = 'TECHNICAL_PROBLEM', 'Technical Problem'
+    PROCTOR_DECISION = 'PROCTOR_DECISION', 'Proctor Decision'
+    OTHER = 'OTHER', 'Other'
+
+
+class ReattemptAuthStatus(models.TextChoices):
+    AUTHORIZED = 'AUTHORIZED', 'Authorized'
+    CONSUMED = 'CONSUMED', 'Consumed'
+
+
+class ProctorReattemptAuthorization(UUIDModel, TimeStampedModel):
+    """
+    Authoritative proctor grant authorizing exactly one second-chance reattempt
+    for a student whose prior attempt was CANCELLED.
+    """
+    original_attempt = models.ForeignKey(
+        'assessments.TestAttempt',
+        on_delete=models.PROTECT,
+        related_name='reattempt_authorizations'
+    )
+    new_attempt = models.OneToOneField(
+        'assessments.TestAttempt',
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name='reattempt_origin'
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='reattempt_authorizations'
+    )
+    assessment = models.ForeignKey(
+        'assessments.Assessment',
+        on_delete=models.PROTECT,
+        related_name='reattempt_authorizations'
+    )
+    authorized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='authorized_reattempts'
+    )
+    reason = models.CharField(max_length=32, choices=ReattemptReason.choices)
+    note = models.TextField(blank=True, default='')
+    authorized_at = models.DateTimeField(default=timezone.now)
+    available_at = models.DateTimeField(db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=ReattemptAuthStatus.choices,
+        default=ReattemptAuthStatus.AUTHORIZED,
+        db_index=True
+    )
+
+    class Meta:
+        db_table = 'proctor_reattempt_authorizations'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['student', 'assessment'],
+                name='unique_reattempt_per_student_assessment'
+            ),
+            models.UniqueConstraint(
+                fields=['original_attempt'],
+                name='unique_reattempt_per_original_attempt'
+            )
+        ]
+
+    def __str__(self):
+        return f"ReattemptAuth for {self.student.email} on {self.assessment.title} ({self.status})"
