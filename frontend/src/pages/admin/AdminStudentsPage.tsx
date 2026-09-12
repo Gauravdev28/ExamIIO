@@ -1,0 +1,620 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { fetchStudents, disableStudent, enableStudent, bulkDeleteStudents } from '../../api/students';
+import { Card } from '../../components/common/Card';
+import { Button } from '../../components/common/Button';
+import { Badge } from '../../components/common/Badge';
+import { PageHeader } from '../../components/common/PageHeader';
+import { AddStudentModal } from '../../components/admin/AddStudentModal';
+import { BulkImportModal } from '../../components/admin/BulkImportModal';
+import { StudentDetailsModal } from '../../components/admin/StudentDetailsModal';
+import {
+  Users,
+  UserPlus,
+  UploadCloud,
+  Search,
+  Filter,
+  Eye,
+  Power,
+  ChevronLeft,
+  ChevronRight,
+  ShieldAlert,
+  Trash2,
+  AlertCircle,
+  CheckCircle2,
+  X,
+} from 'lucide-react';
+import { StudentProfile } from '../../types/student';
+
+export const AdminStudentsPage: React.FC = () => {
+  const [students, setStudents] = useState<StudentProfile[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize] = useState<number>(15);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('active');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+
+  // Selection state
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
+  const [bulkDeleteResult, setBulkDeleteResult] = useState<{
+    total: number;
+    success_count: number;
+    failure_count: number;
+    results: Array<{ id: string; email?: string; roll_number?: string; success: boolean; error?: string }>;
+  } | null>(null);
+
+  // Modals state
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState<StudentProfile | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+
+  const loadStudents = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const activeParam =
+        statusFilter === 'active' ? true : statusFilter === 'disabled' ? false : undefined;
+
+      const res = await fetchStudents({
+        page: currentPage,
+        page_size: pageSize,
+        search: searchTerm.trim() || undefined,
+        is_active: activeParam,
+      });
+
+      if (res.data) {
+        setStudents(res.data.results);
+        setTotalCount(res.data.count);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.error?.message || 'Failed to fetch student records.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentPage, pageSize, searchTerm, statusFilter]);
+
+  useEffect(() => {
+    loadStudents();
+  }, [loadStudents]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCurrentPage(1);
+    loadStudents();
+  };
+
+  const handleQuickToggleStatus = async (student: StudentProfile) => {
+    try {
+      const res = student.is_active
+        ? await disableStudent(student.id)
+        : await enableStudent(student.id);
+      if (res.data) {
+        setStudents((prev) =>
+          prev.map((s) => (s.id === student.id ? { ...s, is_active: res.data!.is_active } : s))
+        );
+      }
+    } catch (err: any) {
+      alert(err.error?.message || 'Failed to update account status.');
+    }
+  };
+
+  // Clear selection on page or filter mutation
+  useEffect(() => {
+    setSelectedStudentIds(new Set());
+  }, [currentPage, statusFilter, searchTerm]);
+
+  const handleSelectAllVisible = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedStudentIds(new Set(students.map((s) => s.id)));
+    } else {
+      setSelectedStudentIds(new Set());
+    }
+  };
+
+  const handleToggleSelectStudent = (id: string) => {
+    setSelectedStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleExecuteBulkDelete = async () => {
+    if (selectedStudentIds.size === 0) return;
+    setIsBulkDeleting(true);
+    setBulkDeleteError(null);
+    try {
+      const res = await bulkDeleteStudents(Array.from(selectedStudentIds));
+      if (res.data) {
+        setBulkDeleteResult(res.data);
+        if (res.data.success_count > 0) {
+          setActionSuccessMessage(`Successfully deleted ${res.data.success_count} student account(s).`);
+          loadStudents();
+        }
+        const successfulIds = new Set(
+          res.data.results.filter((r) => r.success).map((r) => r.id)
+        );
+        setSelectedStudentIds((prev) => {
+          const next = new Set(prev);
+          successfulIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+    } catch (err: any) {
+      setBulkDeleteError(
+        err.response?.data?.error?.message ||
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to execute bulk deletion.'
+      );
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      {/* Header Banner */}
+      <PageHeader
+        icon={<Users className="w-6 h-6" />}
+        title="Student Management"
+        badge={<Badge variant="neutral" size="sm">ADMIN</Badge>}
+        description="Enroll students, generate EUIDs, oversee account states, and manage bulk CSV/Excel rosters."
+        actions={
+          <div className="flex items-center gap-3">
+            <Button variant="secondary" size="md" onClick={() => setIsImportOpen(true)}>
+              <UploadCloud className="w-4 h-4 text-purple-600 mr-1.5" />
+              Bulk Import
+            </Button>
+            <Button variant="primary" size="md" onClick={() => setIsAddOpen(true)}>
+              <UserPlus className="w-4 h-4 mr-1.5" />
+              Enroll Student
+            </Button>
+          </div>
+        }
+      />
+
+      {/* Filter & Search Bar */}
+      <Card className="p-4">
+        <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-4 justify-between">
+          <div className="relative flex-1">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+              <Search className="w-4 h-4" />
+            </div>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by Roll Number, EUID, or Email address..."
+              className="w-full pl-10 pr-4 py-2 rounded-lg bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <Filter className="w-3.5 h-3.5" />
+              <span className="font-medium">Status:</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="bg-white border border-slate-300 text-slate-800 py-1.5 px-3 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="all">All Accounts</option>
+                <option value="active">Active Only</option>
+                <option value="disabled">Disabled Only</option>
+              </select>
+            </div>
+            <Button type="submit" variant="secondary" size="sm">
+              Apply
+            </Button>
+          </div>
+        </form>
+      </Card>
+
+      {/* Success Notification */}
+      {actionSuccessMessage && (
+        <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{actionSuccessMessage}</span>
+          </div>
+          <button
+            onClick={() => setActionSuccessMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Bulk Action Toolbar */}
+      {selectedStudentIds.size > 0 && (
+        <div className="bg-slate-900 border border-slate-800 text-white px-5 py-3 rounded-xl shadow-xl flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-md">
+              {selectedStudentIds.size} student{selectedStudentIds.size === 1 ? '' : 's'} selected
+            </span>
+            <span className="text-xs text-slate-300">of {students.length} on this page</span>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedStudentIds(new Set())}
+              className="text-slate-300 hover:text-white text-xs"
+            >
+              Deselect All
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                setBulkDeleteError(null);
+                setBulkDeleteResult(null);
+                setIsBulkDeleteModalOpen(true);
+              }}
+              className="bg-rose-600 hover:bg-rose-700 text-white text-xs flex items-center gap-1.5 font-semibold shadow-sm"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Selected ({selectedStudentIds.size})</span>
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Students Table */}
+      <Card className="overflow-hidden p-0">
+        {isLoading ? (
+          <div className="py-20 flex flex-col items-center justify-center text-slate-500 space-y-3">
+            <svg className="animate-spin h-7 w-7 text-emerald-600" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span className="text-xs font-mono">Loading student roster...</span>
+          </div>
+        ) : errorMessage ? (
+          <div className="py-16 text-center text-rose-600 text-xs space-y-2">
+            <ShieldAlert className="w-8 h-8 mx-auto" />
+            <p>{errorMessage}</p>
+          </div>
+        ) : students.length === 0 ? (
+          <div className="py-20 text-center text-slate-500 space-y-3">
+            <Users className="w-10 h-10 mx-auto text-slate-400" />
+            <p className="text-sm font-semibold text-slate-800">No students found.</p>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              Get started by enrolling a student individually or importing a class roster via CSV/XLSX.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto text-xs">
+            <table className="w-full text-left font-mono">
+              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase tracking-wider font-semibold">
+                <tr>
+                  <th className="p-3.5 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={students.length > 0 && selectedStudentIds.size === students.length}
+                      onChange={handleSelectAllVisible}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
+                      title="Select all visible students"
+                    />
+                  </th>
+                  <th className="p-3.5">Roll Number</th>
+                  <th className="p-3.5">EUID</th>
+                  <th className="p-3.5">🪙 Coins</th>
+                  <th className="p-3.5">Email</th>
+                  <th className="p-3.5">Status</th>
+                  <th className="p-3.5">First Login</th>
+                  <th className="p-3.5">Enrolled Date</th>
+                  <th className="p-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {students.map((student) => {
+                  const isSelected = selectedStudentIds.has(student.id);
+                  return (
+                    <tr
+                      key={student.id}
+                      className={`hover:bg-slate-50/80 transition-colors ${
+                        isSelected ? 'bg-emerald-50/40' : ''
+                      }`}
+                    >
+                      <td className="p-3.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectStudent(student.id)}
+                          className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
+                        />
+                      </td>
+                      <td className="p-3.5 font-bold text-slate-900">{student.roll_number}</td>
+                      <td className="p-3.5 text-emerald-700 font-semibold">{student.euid}</td>
+                      <td className="p-3.5">
+                        <span className="inline-flex items-center gap-1 font-mono font-bold text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-200">
+                          🪙 {student.coins ?? 0}
+                        </span>
+                      </td>
+                      <td className="p-3.5 text-slate-800 font-sans">{student.email}</td>
+                      <td className="p-3.5">
+                        <Badge variant={student.is_active ? 'success' : 'danger'} size="sm">
+                          {student.is_active ? 'ACTIVE' : 'DISABLED'}
+                        </Badge>
+                      </td>
+                      <td className="p-3.5">
+                        <span
+                          className={
+                            student.first_login_required
+                              ? 'text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200'
+                              : 'text-slate-700 font-semibold bg-slate-100 px-2 py-0.5 rounded border border-slate-200'
+                          }
+                        >
+                          {student.first_login_required ? 'Pending' : 'Completed'}
+                        </span>
+                      </td>
+                      <td className="p-3.5 text-slate-700 font-semibold font-sans">
+                        {new Date(student.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="p-3.5 text-right space-x-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedStudent(student);
+                            setIsDetailsOpen(true);
+                          }}
+                          className="text-slate-600 hover:text-slate-900"
+                        >
+                          <Eye className="w-3.5 h-3.5 mr-1" />
+                          View
+                        </Button>
+                        <Button
+                          variant={student.is_active ? 'ghost' : 'secondary'}
+                          size="sm"
+                          onClick={() => handleQuickToggleStatus(student)}
+                          className={student.is_active ? 'text-rose-600 hover:bg-rose-50' : 'text-emerald-700'}
+                        >
+                          <Power className="w-3.5 h-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Pagination Bar */}
+        {!isLoading && students.length > 0 && (
+          <div className="flex items-center justify-between p-4 border-t border-slate-200 text-xs text-slate-500">
+            <span>
+              Showing <strong className="text-slate-900">{(currentPage - 1) * pageSize + 1}</strong> to{' '}
+              <strong className="text-slate-900">{Math.min(currentPage * pageSize, totalCount)}</strong> of{' '}
+              <strong className="text-slate-900">{totalCount}</strong> students
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <span className="font-mono text-slate-700 font-medium">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Modals */}
+      <AddStudentModal
+        isOpen={isAddOpen}
+        onClose={() => setIsAddOpen(false)}
+        onSuccess={() => {
+          loadStudents();
+        }}
+      />
+
+      <BulkImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onSuccess={() => {
+          loadStudents();
+        }}
+      />
+
+      <StudentDetailsModal
+        student={selectedStudent}
+        isOpen={isDetailsOpen}
+        onClose={() => setIsDetailsOpen(false)}
+        onUpdate={() => {
+          loadStudents();
+        }}
+        onDelete={() => {
+          loadStudents();
+        }}
+      />
+
+      {/* Bulk Delete Modal */}
+      {isBulkDeleteModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 animate-in zoom-in-95">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-rose-50/50">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-rose-100 text-rose-700 rounded-xl">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Delete {selectedStudentIds.size} Student Account{selectedStudentIds.size === 1 ? '' : 's'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Confirm permanent removal of selected student accounts
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!isBulkDeleting) {
+                    setIsBulkDeleteModalOpen(false);
+                    setBulkDeleteResult(null);
+                  }
+                }}
+                disabled={isBulkDeleting}
+                className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {bulkDeleteError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-lg flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{bulkDeleteError}</span>
+                </div>
+              )}
+
+              {bulkDeleteResult ? (
+                <div className="space-y-3">
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
+                    <div className="font-semibold text-slate-900">Deletion Summary:</div>
+                    <div className="text-emerald-700 font-mono">
+                      ✓ Succeeded: {bulkDeleteResult.success_count}
+                    </div>
+                    {bulkDeleteResult.failure_count > 0 && (
+                      <div className="text-rose-700 font-mono">
+                        ✕ Failed: {bulkDeleteResult.failure_count}
+                      </div>
+                    )}
+                  </div>
+
+                  {bulkDeleteResult.failure_count > 0 && (
+                    <div className="max-h-48 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-3 text-xs bg-white">
+                      <div className="font-semibold text-slate-800 mb-1">Errors:</div>
+                      {bulkDeleteResult.results
+                        .filter((r) => !r.success)
+                        .map((r) => (
+                          <div key={r.id} className="p-2 bg-rose-50 rounded border border-rose-100 text-rose-800">
+                            <span className="font-mono font-bold">{r.roll_number || r.id}:</span> {r.error}
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-1">
+                    <p className="font-semibold">⚠️ Critical Action Warning</p>
+                    <p>
+                      This will permanently delete the selected student profiles and credentials. If any student has
+                      completed/in-progress test attempts or locked exam records, their deletion will be blocked by
+                      system audit rules.
+                    </p>
+                  </div>
+
+                  <div className="text-xs font-semibold text-slate-700">Selected Students:</div>
+                  <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg bg-slate-50/50">
+                    {students
+                      .filter((s) => selectedStudentIds.has(s.id))
+                      .map((s) => (
+                        <div key={s.id} className="p-2.5 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-mono font-bold text-slate-900 mr-2">{s.roll_number}</span>
+                            <span className="text-slate-500 font-mono">{s.euid}</span>
+                            <div className="text-[11px] text-slate-600 font-sans">{s.email}</div>
+                          </div>
+                          {s.section && (
+                            <Badge variant="purple" size="sm" className="font-mono">
+                              {s.section.code}
+                            </Badge>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              {bulkDeleteResult ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setIsBulkDeleteModalOpen(false);
+                    setBulkDeleteResult(null);
+                  }}
+                >
+                  Close
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsBulkDeleteModalOpen(false)}
+                    disabled={isBulkDeleting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={handleExecuteBulkDelete}
+                    disabled={isBulkDeleting}
+                    className="bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5"
+                  >
+                    {isBulkDeleting ? (
+                      <>
+                        <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        <span>Deleting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Confirm Delete</span>
+                      </>
+                    )}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AdminStudentsPage;
