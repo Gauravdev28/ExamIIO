@@ -1,0 +1,291 @@
+import { apiClient } from './client';
+import { APIResponse, PaginatedResponse } from '../types/api';
+import {
+  QuestionItem,
+  QuestionVersionDetail,
+  QuestionVersionSummary,
+  CreateQuestionPayload,
+  UpdateQuestionVersionPayload,
+  Tag,
+  QuestionImportPreview,
+} from '../types/question';
+
+export interface QuestionFilters {
+  page?: number;
+  page_size?: number;
+  search?: string;
+  type?: string;
+  difficulty?: string;
+  status?: string;
+  version_status?: string;
+  tag?: string;
+  ordering?: string;
+}
+
+export const getQuestions = async (
+  filters: QuestionFilters = {}
+): Promise<PaginatedResponse<QuestionItem>> => {
+  const params: Record<string, any> = {};
+  if (filters.page) params.page = filters.page;
+  if (filters.page_size) params.page_size = filters.page_size;
+  if (filters.search) params.search = filters.search;
+  if (filters.type) params.type = filters.type;
+  if (filters.difficulty) params.difficulty = filters.difficulty;
+  if (filters.status) params.status = filters.status;
+  if (filters.version_status) params.version_status = filters.version_status;
+  if (filters.tag) params.tag = filters.tag;
+  if (filters.ordering) params.ordering = filters.ordering;
+
+  const res = await apiClient.get<PaginatedResponse<QuestionItem>>('/admin/questions/', { params });
+  return res.data;
+};
+
+export const createQuestion = async (
+  payload: CreateQuestionPayload
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.post<APIResponse<QuestionVersionDetail>>('/admin/questions/', payload);
+  return res.data;
+};
+
+export const getQuestionDetail = async (
+  questionId: string
+): Promise<APIResponse<{ id: string; question_type: string; status: string; versions: QuestionVersionSummary[] }>> => {
+  const res = await apiClient.get<APIResponse<any>>(`/admin/questions/${questionId}/`);
+  return res.data;
+};
+
+export const archiveQuestion = async (
+  questionId: string
+): Promise<APIResponse<any>> => {
+  const res = await apiClient.post<APIResponse<any>>(`/admin/questions/${questionId}/archive/`);
+  return res.data;
+};
+
+export const deleteDraftQuestion = async (
+  questionId: string
+): Promise<APIResponse<null>> => {
+  const res = await apiClient.delete<APIResponse<null>>(`/admin/questions/${questionId}/`);
+  return res.data;
+};
+
+export const getQuestionVersions = async (
+  questionId: string
+): Promise<APIResponse<QuestionVersionSummary[]>> => {
+  const res = await apiClient.get<APIResponse<QuestionVersionSummary[]>>(`/admin/questions/${questionId}/versions/`);
+  return res.data;
+};
+
+export const createNewVersion = async (
+  questionId: string
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.post<APIResponse<QuestionVersionDetail>>(`/admin/questions/${questionId}/versions/`);
+  return res.data;
+};
+
+export const getQuestionVersionDetail = async (
+  questionId: string,
+  versionNumber: number
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.get<APIResponse<QuestionVersionDetail>>(
+    `/admin/questions/${questionId}/versions/${versionNumber}/`
+  );
+  return res.data;
+};
+
+export const updateDraftVersion = async (
+  questionId: string,
+  versionNumber: number,
+  payload: UpdateQuestionVersionPayload
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.patch<APIResponse<QuestionVersionDetail>>(
+    `/admin/questions/${questionId}/versions/${versionNumber}/`,
+    payload
+  );
+  return res.data;
+};
+
+export const publishVersion = async (
+  questionId: string,
+  versionNumber: number
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.post<APIResponse<QuestionVersionDetail>>(
+    `/admin/questions/${questionId}/versions/${versionNumber}/publish/`
+  );
+  return res.data;
+};
+
+export const archiveVersion = async (
+  questionId: string,
+  versionNumber: number
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.post<APIResponse<QuestionVersionDetail>>(
+    `/admin/questions/${questionId}/versions/${versionNumber}/archive/`
+  );
+  return res.data;
+};
+
+export const getQuestionVersionPreview = async (
+  questionId: string,
+  versionNumber: number
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.get<APIResponse<QuestionVersionDetail>>(
+    `/admin/questions/${questionId}/versions/${versionNumber}/preview/`
+  );
+  return res.data;
+};
+
+export const getTags = async (): Promise<APIResponse<Tag[]>> => {
+  const res = await apiClient.get<APIResponse<Tag[]>>('/admin/tags/');
+  return res.data;
+};
+
+export const downloadImportTemplate = async (format: 'csv' | 'xlsx' = 'csv'): Promise<Blob> => {
+  const res = await apiClient.get(`/admin/questions/import/template/?format=${format}`, {
+    responseType: 'blob',
+  });
+  return res.data;
+};
+
+export const previewSpreadsheetImport = async (file: File): Promise<APIResponse<QuestionImportPreview>> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await apiClient.post<APIResponse<QuestionImportPreview>>('/admin/questions/import/preview/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data;
+};
+
+export const confirmSpreadsheetImport = async (rows: any[]): Promise<APIResponse<any>> => {
+  const res = await apiClient.post<APIResponse<any>>('/admin/questions/import/confirm/', { rows });
+  return res.data;
+};
+
+
+export interface AssessmentUsageItem {
+  id: string;
+  title: string;
+  status: string;
+  total_points?: number;
+}
+
+export interface QuestionUsageInfo {
+  is_deletable: boolean;
+  reasons: string[];
+  reason_blocked?: string;
+  assessment_count?: number;
+  assessments_count: number;
+  assessments?: AssessmentUsageItem[];
+  snapshots_count: number;
+  answers_count: number;
+  legal_holds_count: number;
+}
+
+export const getQuestionUsage = async (
+  questionId: string
+): Promise<APIResponse<QuestionUsageInfo>> => {
+  const res = await apiClient.get<APIResponse<QuestionUsageInfo>>(`/admin/questions/${questionId}/usage/`);
+  return res.data;
+};
+
+export const duplicateQuestion = async (
+  questionId: string
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.post<APIResponse<QuestionVersionDetail>>(`/admin/questions/${questionId}/duplicate/`);
+  return res.data;
+};
+
+export interface RunSandboxPayload {
+  source_code: string;
+  language: string;
+  stdin?: string;
+  expected_output?: string;
+  time_limit_ms?: number;
+  cpu_time_limit_ms?: number;
+  memory_limit_mb?: number;
+}
+
+export type ExecutionStatus =
+  | 'QUEUED'
+  | 'PROCESSING'
+  | 'SUCCESS'
+  | 'COMPILATION_ERROR'
+  | 'RUNTIME_ERROR'
+  | 'TIME_LIMIT_EXCEEDED'
+  | 'MEMORY_LIMIT_EXCEEDED'
+  | 'SYSTEM_ERROR'
+  | 'SANDBOX_UNAVAILABLE';
+
+export interface RunSandboxResult {
+  status: ExecutionStatus;
+  status_id?: number;
+  status_description?: string;
+  stdout: string | null;
+  stderr: string | null;
+  compile_output: string | null;
+  execution_time_ms: number;
+  memory_kb: number;
+  time?: number;
+  memory?: number;
+  passed?: boolean | null;
+  expected_output?: string;
+}
+
+export const runSandboxTest = async (
+  payload: RunSandboxPayload
+): Promise<APIResponse<RunSandboxResult>> => {
+  const res = await apiClient.post<APIResponse<RunSandboxResult>>('/admin/questions/run-sandbox/', payload);
+  return res.data;
+};
+
+export const getQuestionVersionHealth = async (
+  questionId: string,
+  versionNumber: number
+): Promise<APIResponse<any>> => {
+  const res = await apiClient.get<APIResponse<any>>(
+    `/admin/questions/${questionId}/versions/${versionNumber}/health/`
+  );
+  return res.data;
+};
+
+export const getSupportedLanguages = async (): Promise<APIResponse<{ languages: any[] }>> => {
+  const res = await apiClient.get<APIResponse<{ languages: any[] }>>('/admin/questions/languages/');
+  return res.data;
+};
+
+export const getPlatformImportStatus = async (): Promise<APIResponse<any>> => {
+  const res = await apiClient.get<APIResponse<any>>('/admin/questions/platform-import/status/');
+  return res.data;
+};
+
+export const previewPlatformImport = async (
+  source: string,
+  data?: any,
+  file?: File
+): Promise<APIResponse<any>> => {
+  if (file) {
+    const formData = new FormData();
+    formData.append('source', source);
+    formData.append('file', file);
+    if (data) formData.append('data', JSON.stringify(data));
+    const res = await apiClient.post<APIResponse<any>>('/admin/questions/platform-import/preview/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  } else {
+    const res = await apiClient.post<APIResponse<any>>('/admin/questions/platform-import/preview/', {
+      source,
+      data,
+    });
+    return res.data;
+  }
+};
+
+export const confirmPlatformImport = async (
+  normalized_payload: any
+): Promise<APIResponse<QuestionVersionDetail>> => {
+  const res = await apiClient.post<APIResponse<QuestionVersionDetail>>('/admin/questions/platform-import/confirm/', {
+    normalized_payload,
+  });
+  return res.data;
+};
+
