@@ -1,3 +1,5 @@
+import { ReattemptInfo } from './invigilation';
+
 export type ProctoringSessionStatus = 'ACTIVE' | 'PAUSED' | 'TERMINATED' | 'DEGRADED';
 
 export type RiskBand = 'NORMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
@@ -78,6 +80,11 @@ export interface AdminProctoringSessionSummary {
   termination_remaining_seconds?: number | null;
   is_disqualified?: boolean;
   disqualification_reason?: string | null;
+  attempt_number?: number;
+  assessment_title?: string;
+  is_already_reattempt?: boolean;
+  can_grant_reattempt?: boolean;
+  reattempt?: ReattemptInfo | null;
   created_at: string;
   updated_at: string;
 }

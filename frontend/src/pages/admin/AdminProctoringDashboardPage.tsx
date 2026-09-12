@@ -16,6 +16,7 @@ import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { InvigilationAPI } from '../../api/invigilation';
+import { ReattemptReason } from '../../types/invigilation';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -28,6 +29,8 @@ import {
   Camera,
   Activity,
   CheckCircle,
+  RotateCcw,
+  X,
 } from 'lucide-react';
 
 export const AdminProctoringDashboardPage: React.FC = () => {
@@ -49,6 +52,39 @@ export const AdminProctoringDashboardPage: React.FC = () => {
   const [reviewNotes, setReviewNotes] = useState<string>('');
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [cancellingAttemptId, setCancellingAttemptId] = useState<string | null>(null);
+
+  // Second-Chance / Reattempt state
+  const [showReattemptModal, setShowReattemptModal] = useState(false);
+  const [reattemptReason, setReattemptReason] = useState<ReattemptReason>('ACCIDENTAL_VIOLATION');
+  const [reattemptNote, setReattemptNote] = useState('');
+  const [isSubmittingReattempt, setIsSubmittingReattempt] = useState(false);
+  const [reattemptSuccessMessage, setReattemptSuccessMessage] = useState<string | null>(null);
+  const [reattemptErrorMessage, setReattemptErrorMessage] = useState<string | null>(null);
+  const [reattemptRemainingSeconds, setReattemptRemainingSeconds] = useState<number>(0);
+
+  // 60-Second Reattempt Preparation Window Countdown
+  useEffect(() => {
+    if (sessionDetail?.reattempt && sessionDetail.reattempt.status === 'AUTHORIZED') {
+      const initialSeconds = sessionDetail.reattempt.available_at
+        ? Math.max(0, Math.floor((new Date(sessionDetail.reattempt.available_at).getTime() - Date.now()) / 1000))
+        : sessionDetail.reattempt.remaining_seconds || 0;
+      setReattemptRemainingSeconds(initialSeconds);
+      if (initialSeconds > 0) {
+        const timer = setInterval(() => {
+          setReattemptRemainingSeconds((prev) => {
+            if (prev <= 1) {
+              clearInterval(timer);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+        return () => clearInterval(timer);
+      }
+    } else {
+      setReattemptRemainingSeconds(0);
+    }
+  }, [sessionDetail?.reattempt?.status, sessionDetail?.reattempt?.available_at]);
 
   const formatTimer = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -89,8 +125,17 @@ export const AdminProctoringDashboardPage: React.FC = () => {
         ws.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
-            if (payload.type === 'PROCTOR_EVENT') {
+            if (
+              payload.type === 'PROCTOR_EVENT' ||
+              payload.type === 'REATTEMPT_AUTHORIZED' ||
+              payload.event === 'REATTEMPT_AUTHORIZED'
+            ) {
               fetchSessions();
+              if (selectedSessionId) {
+                getAdminProctoringSessionDetail(selectedSessionId)
+                  .then((updated) => setSessionDetail(updated))
+                  .catch(() => {});
+              }
             }
           } catch (e) {
             // ignore parsing error
@@ -153,6 +198,9 @@ export const AdminProctoringDashboardPage: React.FC = () => {
   const handleOpenDetail = async (sessionId: string) => {
     setSelectedSessionId(sessionId);
     setIsDetailLoading(true);
+    setReattemptSuccessMessage(null);
+    setReattemptErrorMessage(null);
+    setShowReattemptModal(false);
     try {
       const detail = await getAdminProctoringSessionDetail(sessionId);
       setSessionDetail(detail);
@@ -173,6 +221,54 @@ export const AdminProctoringDashboardPage: React.FC = () => {
   const handleCloseDetail = () => {
     setSelectedSessionId(null);
     setSessionDetail(null);
+    setShowReattemptModal(false);
+    setReattemptSuccessMessage(null);
+    setReattemptErrorMessage(null);
+  };
+
+  const handleOpenReattemptModal = () => {
+    setReattemptReason('ACCIDENTAL_VIOLATION');
+    setReattemptNote('');
+    setReattemptErrorMessage(null);
+    setShowReattemptModal(true);
+  };
+
+  const handleConfirmReattempt = async () => {
+    if (!sessionDetail) return;
+    if (reattemptReason === 'OTHER' && !reattemptNote.trim()) {
+      setReattemptErrorMessage('An explanatory note is required when reason is "Other".');
+      return;
+    }
+    setIsSubmittingReattempt(true);
+    setReattemptErrorMessage(null);
+    try {
+      await InvigilationAPI.authorizeReattempt(sessionDetail.attempt_id, {
+        reason: reattemptReason,
+        note: reattemptNote.trim(),
+      });
+      setShowReattemptModal(false);
+      setReattemptNote('');
+      setReattemptSuccessMessage(
+        'Second chance authorized successfully. The student can begin Attempt #2 after the 60-second preparation period.'
+      );
+      // Refresh current detail and list
+      if (selectedSessionId) {
+        const updated = await getAdminProctoringSessionDetail(selectedSessionId);
+        setSessionDetail(updated);
+      }
+      fetchSessions();
+    } catch (err: any) {
+      const msg =
+        err.response?.data?.error ||
+        err.response?.data?.detail ||
+        (typeof err.response?.data === 'string' ? err.response?.data : null) ||
+        err.error?.message ||
+        err.message ||
+        'Failed to authorize second chance.';
+      setReattemptErrorMessage(msg);
+    } finally {
+      setIsSubmittingReattempt(false);
+    }
   };
 
   const handleSaveReview = async () => {
@@ -665,8 +761,288 @@ export const AdminProctoringDashboardPage: React.FC = () => {
                       </Button>
                     </div>
                   </div>
+
+                  {/* Reattempt Success Notification */}
+                  {reattemptSuccessMessage && (
+                    <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 flex items-center justify-between gap-3 shadow-sm">
+                      <div className="flex items-center gap-2.5">
+                        <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+                        <span className="font-medium">{reattemptSuccessMessage}</span>
+                      </div>
+                      <button
+                        onClick={() => setReattemptSuccessMessage(null)}
+                        className="text-emerald-700 hover:text-emerald-950 p-1"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Second-Chance Action Section */}
+                  <div className="p-5 bg-white border border-slate-200 rounded-xl space-y-4 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-600">
+                          <RotateCcw className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900">Second-Chance Action</h4>
+                          <p className="text-xs text-slate-500">
+                            Authorize exactly ONE second attempt for a disqualified or cancelled student. Original attempt remains terminal.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* STATE 4 — Attempt is already a reattempt (Attempt #2+) */}
+                    {(sessionDetail.is_already_reattempt || (sessionDetail.attempt_number && sessionDetail.attempt_number > 1)) ? (
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-bold text-slate-800">Attempt #{sessionDetail.attempt_number || 2}: </span>
+                          <span className="text-slate-600">This attempt is already a reattempt. Chaining is prohibited (Attempt #3 is not allowed).</span>
+                        </div>
+                        <Badge variant="neutral">No Action Available</Badge>
+                      </div>
+                    ) : sessionDetail.reattempt?.status === 'CONSUMED' ? (
+                      /* STATE 3 — Consumed */
+                      <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-emerald-900 uppercase tracking-wider text-[11px]">Reattempt:</span>
+                            <span className="px-2.5 py-0.5 bg-emerald-200/80 text-emerald-900 font-bold rounded text-xs">
+                              CONSUMED — Attempt #{sessionDetail.reattempt.new_attempt_number || 2}
+                            </span>
+                          </div>
+                          <span className="text-slate-500 font-mono text-[11px]">
+                            Authorized: {sessionDetail.reattempt.authorized_at ? new Date(sessionDetail.reattempt.authorized_at).toLocaleDateString() : '—'}
+                          </span>
+                        </div>
+                        <p className="text-emerald-800 font-medium">
+                          The candidate has consumed this second chance and begun Attempt #{sessionDetail.reattempt.new_attempt_number || 2}
+                          {sessionDetail.reattempt.new_attempt_id && <span className="font-mono text-slate-700"> (Attempt ID: {sessionDetail.reattempt.new_attempt_id})</span>}.
+                          Attempt #1 remains permanently CANCELLED for audit records.
+                        </p>
+                      </div>
+                    ) : sessionDetail.reattempt?.status === 'AUTHORIZED' ? (
+                      /* STATE 2 — Authorization Pending / Preparation Window */
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 text-xs">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-amber-900 uppercase tracking-wider text-[11px]">Reattempt:</span>
+                            <span className="px-2.5 py-0.5 bg-amber-200/80 text-amber-900 font-bold rounded text-xs">
+                              AUTHORIZED — Waiting for student
+                            </span>
+                          </div>
+                          {reattemptRemainingSeconds > 0 ? (
+                            <span className="px-2.5 py-1 bg-amber-200 border border-amber-300 text-amber-900 font-mono text-xs font-bold rounded animate-pulse">
+                              Preparation Delay: {reattemptRemainingSeconds}s remaining
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 bg-emerald-100 border border-emerald-300 text-emerald-800 font-mono text-xs font-bold rounded">
+                              Ready for Student to Start Attempt #2
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-amber-900">
+                          Second chance authorized. Reason:{' '}
+                          <strong className="capitalize">{sessionDetail.reattempt.reason.toLowerCase().replace(/_/g, ' ')}</strong>
+                          {sessionDetail.reattempt.note && <span className="italic"> — &quot;{sessionDetail.reattempt.note}&quot;</span>}.
+                        </p>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-amber-200/60">
+                          <span className="text-slate-500 font-mono text-[11px]">
+                            Server Available At: {sessionDetail.reattempt.available_at ? new Date(sessionDetail.reattempt.available_at).toLocaleTimeString() : 'Immediate'}
+                          </span>
+                          <Button variant="secondary" size="sm" disabled className="opacity-60 cursor-not-allowed">
+                            Reattempt Already Authorized
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (sessionDetail.is_disqualified || sessionDetail.attempt_status === 'CANCELLED' || sessionDetail.attempt_status === 'DISQUALIFIED') && (sessionDetail.can_grant_reattempt ?? true) ? (
+                      /* STATE 1 — Eligible for Reattempt */
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-800">Attempt #{sessionDetail.attempt_number || 1}:</span>
+                            <Badge variant="danger">
+                              {sessionDetail.is_disqualified ? 'CANCELLED / DISQUALIFIED' : (sessionDetail.attempt_status || 'CANCELLED')}
+                            </Badge>
+                            <span className="text-slate-400">|</span>
+                            <span className="text-slate-600 font-medium">Reattempt Status: <span className="text-slate-500">Not Authorized</span></span>
+                          </div>
+                          <p className="text-slate-500">
+                            Candidate examination was terminated. You can authorize exactly one fresh attempt.
+                          </p>
+                        </div>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={handleOpenReattemptModal}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shrink-0 flex items-center gap-1.5 shadow-sm"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Give Student Another Chance
+                        </Button>
+                      </div>
+                    ) : (
+                      /* STATE 5 — Not Eligible */
+                      <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 flex items-center justify-between">
+                        <span>
+                          Reattempt actions are only available for cancelled or disqualified exam attempts.
+                          (Current status: <strong className="font-semibold text-slate-700">{sessionDetail.attempt_status || 'ACTIVE'}</strong>)
+                        </span>
+                        <Badge variant="neutral">Not Eligible</Badge>
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Give Student Another Chance Confirmation Modal */}
+      {showReattemptModal && sessionDetail && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white border border-emerald-500/40 rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 text-slate-900">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <div className="p-1.5 bg-emerald-100 rounded-lg text-emerald-700">
+                  <RotateCcw className="w-4 h-4" />
+                </div>
+                Give Student Another Chance
+              </h3>
+              <button
+                onClick={() => setShowReattemptModal(false)}
+                className="text-slate-400 hover:text-slate-700 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Candidate & Attempt Metadata */}
+            <div className="p-3.5 bg-slate-50 rounded-xl space-y-1.5 text-xs text-slate-700 border border-slate-200">
+              <div className="grid grid-cols-3 gap-1">
+                <span className="text-slate-500 font-medium">Student:</span>
+                <span className="col-span-2 font-bold text-slate-900">
+                  {sessionDetail.student.full_name} ({sessionDetail.student.email})
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                <span className="text-slate-500 font-medium">Roll Number:</span>
+                <span className="col-span-2 font-mono text-slate-800">
+                  {sessionDetail.student.roll_number || sessionDetail.student.euid || 'N/A'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                <span className="text-slate-500 font-medium">Assessment:</span>
+                <span className="col-span-2 font-semibold text-slate-800">
+                  {sessionDetail.assessment_title || 'Current Assessment'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                <span className="text-slate-500 font-medium">Original Attempt:</span>
+                <span className="col-span-2 font-bold text-slate-900">
+                  #{sessionDetail.attempt_number || 1}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                <span className="text-slate-500 font-medium">Status:</span>
+                <span className="col-span-2 font-bold text-rose-600 uppercase">
+                  {sessionDetail.is_disqualified ? 'CANCELLED / DISQUALIFIED' : (sessionDetail.attempt_status || 'CANCELLED')}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                <span className="text-slate-500 font-medium">Violation:</span>
+                <span className="col-span-2 text-rose-700 font-mono text-[11px]">
+                  {sessionDetail.disqualification_reason || sessionDetail.termination_reason || 'Examination integrity policy violation'}
+                </span>
+              </div>
+            </div>
+
+            {/* Invariant Warning */}
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <p className="leading-relaxed">
+                <strong>Warning:</strong> This action will permanently preserve Attempt #{sessionDetail.attempt_number || 1} as CANCELLED and authorize exactly ONE new attempt for this student. Attempt #{sessionDetail.attempt_number || 1} will not be reopened.
+              </p>
+            </div>
+
+            {/* Reason Selection */}
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                  Reason <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={reattemptReason}
+                  onChange={(e) => {
+                    setReattemptReason(e.target.value as ReattemptReason);
+                    setReattemptErrorMessage(null);
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                >
+                  <option value="ACCIDENTAL_VIOLATION">Accidental violation</option>
+                  <option value="TECHNICAL_PROBLEM">Technical problem</option>
+                  <option value="PROCTOR_DECISION">Proctor decision</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                  {reattemptReason === 'OTHER' ? (
+                    <>
+                      Explanatory Note <span className="text-rose-500">* (Required for Other)</span>
+                    </>
+                  ) : (
+                    'Explanatory Note (Optional)'
+                  )}
+                </label>
+                <textarea
+                  rows={3}
+                  value={reattemptNote}
+                  onChange={(e) => {
+                    setReattemptNote(e.target.value);
+                    if (reattemptErrorMessage) setReattemptErrorMessage(null);
+                  }}
+                  placeholder={
+                    reattemptReason === 'OTHER'
+                      ? 'Detailed justification is required when reason is Other...'
+                      : 'Optional administrator notes for audit log...'
+                  }
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {reattemptErrorMessage && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-medium flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{reattemptErrorMessage}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowReattemptModal(false)}
+                disabled={isSubmittingReattempt}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleConfirmReattempt}
+                disabled={isSubmittingReattempt || (reattemptReason === 'OTHER' && !reattemptNote.trim())}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <RotateCcw className="w-4 h-4" />
+                {isSubmittingReattempt ? 'Authorizing...' : 'Confirm & Authorize Second Chance'}
+              </Button>
             </div>
           </div>
         </div>

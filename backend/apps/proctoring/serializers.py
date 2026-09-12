@@ -1,6 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 from apps.assessments.models import AttemptStatus
+from apps.invigilation.models import ProctorReattemptAuthorization
 from apps.proctoring.models import (
     ProctoringSession,
     ProctoringSessionStatus,
@@ -36,23 +37,20 @@ class StudentProctoringSessionSerializer(serializers.ModelSerializer):
 
 class StudentProctoringEventIngestSerializer(serializers.Serializer):
     client_incident_id = serializers.UUIDField(required=False, allow_null=True, default=None)
+    client_event_id = serializers.UUIDField(required=False, allow_null=True, default=None)
     event_type = serializers.CharField(max_length=64)
     client_detected_at = serializers.DateTimeField(required=False, allow_null=True)
     metadata = serializers.DictField(required=False, default=dict)
 
+    def validate(self, attrs):
+        # Normalize client_event_id to client_incident_id for single internal identity
+        if not attrs.get('client_incident_id') and attrs.get('client_event_id'):
+            attrs['client_incident_id'] = attrs['client_event_id']
+        return attrs
+
     def validate_event_type(self, value):
-        allowed = [
-            'WINDOW_BLUR',
-            'TAB_SWITCH',
-            'WINDOW_FOCUS_LOST',
-            'SCREENSHOT_ATTEMPT',
-            'FULLSCREEN_EXIT',
-            'FULLSCREEN_ENTER',
-            'PAGE_VISIBILITY_CHANGE',
-            'CAMERA_UNAVAILABLE',
-            'MICROPHONE_UNAVAILABLE',
-        ]
-        if value not in allowed:
+        from apps.proctoring.security_policy import BrowserSecurityPolicy
+        if not BrowserSecurityPolicy.is_valid_event_type(value):
             raise serializers.ValidationError(f"Invalid client event type: '{value}'.")
         return value
 
@@ -92,9 +90,58 @@ class ProctoringWarningSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'warning_type', 'message', 'issued_at']
 
 
-class AdminProctoringSessionListSerializer(serializers.ModelSerializer):
+class ReattemptSerializerMixin:
+    def get_is_already_reattempt(self, obj):
+        att = getattr(obj, 'attempt', None)
+        if not att:
+            return False
+        return bool(hasattr(att, 'reattempt_origin') and att.reattempt_origin is not None)
+
+    def _get_reattempt_auth(self, obj):
+        if not hasattr(obj, '_cached_reattempt_auth'):
+            att = getattr(obj, 'attempt', None)
+            if not att or not getattr(att, 'assessment', None) or not getattr(att, 'student', None):
+                obj._cached_reattempt_auth = None
+            else:
+                obj._cached_reattempt_auth = ProctorReattemptAuthorization.objects.filter(
+                    assessment=att.assessment,
+                    student=att.student
+                ).select_related('new_attempt').first()
+        return obj._cached_reattempt_auth
+
+    def get_can_grant_reattempt(self, obj):
+        att = getattr(obj, 'attempt', None)
+        if not att:
+            return False
+        auth = self._get_reattempt_auth(obj)
+        is_cancelled = (att.status == AttemptStatus.CANCELLED)
+        is_already_reattempt = bool(hasattr(att, 'reattempt_origin') and att.reattempt_origin is not None)
+        return is_cancelled and not is_already_reattempt and auth is None
+
+    def get_reattempt(self, obj):
+        auth = self._get_reattempt_auth(obj)
+        if not auth:
+            return None
+        now = timezone.now()
+        rem_sec = max(0, int((auth.available_at - now).total_seconds())) if auth.available_at else 0
+        return {
+            "id": str(auth.id),
+            "status": auth.status,
+            "authorized_at": auth.authorized_at.isoformat() if auth.authorized_at else None,
+            "available_at": auth.available_at.isoformat() if auth.available_at else None,
+            "remaining_seconds": rem_sec,
+            "reason": auth.reason,
+            "note": auth.note,
+            "new_attempt_id": str(auth.new_attempt_id) if auth.new_attempt_id else None,
+            "new_attempt_number": auth.new_attempt.attempt_number if auth.new_attempt else 2,
+        }
+
+
+class AdminProctoringSessionListSerializer(ReattemptSerializerMixin, serializers.ModelSerializer):
     session_id = serializers.UUIDField(source='id', read_only=True)
     attempt_id = serializers.UUIDField(source='attempt.id', read_only=True)
+    attempt_number = serializers.IntegerField(source='attempt.attempt_number', read_only=True)
+    assessment_title = serializers.CharField(source='attempt.assessment.title', read_only=True)
     attempt_status = serializers.SerializerMethodField()
     latest_violation = serializers.SerializerMethodField()
     latest_violation_at = serializers.SerializerMethodField()
@@ -106,12 +153,17 @@ class AdminProctoringSessionListSerializer(serializers.ModelSerializer):
     termination_remaining_seconds = serializers.SerializerMethodField()
     is_disqualified = serializers.BooleanField(source='attempt.is_disqualified', read_only=True)
     disqualification_reason = serializers.CharField(source='attempt.disqualification_reason', read_only=True)
+    is_already_reattempt = serializers.SerializerMethodField()
+    can_grant_reattempt = serializers.SerializerMethodField()
+    reattempt = serializers.SerializerMethodField()
 
     class Meta:
         model = ProctoringSession
         fields = [
             'session_id',
             'attempt_id',
+            'attempt_number',
+            'assessment_title',
             'student',
             'status',
             'attempt_status',
@@ -129,6 +181,9 @@ class AdminProctoringSessionListSerializer(serializers.ModelSerializer):
             'termination_remaining_seconds',
             'is_disqualified',
             'disqualification_reason',
+            'is_already_reattempt',
+            'can_grant_reattempt',
+            'reattempt',
             'created_at',
             'updated_at',
         ]
@@ -231,9 +286,11 @@ class AdminProctoringReviewSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'reviewed_by', 'reviewed_at']
 
 
-class AdminProctoringSessionDetailSerializer(serializers.ModelSerializer):
+class AdminProctoringSessionDetailSerializer(ReattemptSerializerMixin, serializers.ModelSerializer):
     session_id = serializers.UUIDField(source='id', read_only=True)
     attempt_id = serializers.UUIDField(source='attempt.id', read_only=True)
+    attempt_number = serializers.IntegerField(source='attempt.attempt_number', read_only=True)
+    assessment_title = serializers.CharField(source='attempt.assessment.title', read_only=True)
     attempt_status = serializers.SerializerMethodField()
     latest_violation = serializers.SerializerMethodField()
     latest_violation_at = serializers.SerializerMethodField()
@@ -248,12 +305,17 @@ class AdminProctoringSessionDetailSerializer(serializers.ModelSerializer):
     termination_remaining_seconds = serializers.SerializerMethodField()
     is_disqualified = serializers.BooleanField(source='attempt.is_disqualified', read_only=True)
     disqualification_reason = serializers.CharField(source='attempt.disqualification_reason', read_only=True)
+    is_already_reattempt = serializers.SerializerMethodField()
+    can_grant_reattempt = serializers.SerializerMethodField()
+    reattempt = serializers.SerializerMethodField()
 
     class Meta:
         model = ProctoringSession
         fields = [
             'session_id',
             'attempt_id',
+            'attempt_number',
+            'assessment_title',
             'student',
             'status',
             'attempt_status',
@@ -271,6 +333,9 @@ class AdminProctoringSessionDetailSerializer(serializers.ModelSerializer):
             'termination_remaining_seconds',
             'is_disqualified',
             'disqualification_reason',
+            'is_already_reattempt',
+            'can_grant_reattempt',
+            'reattempt',
             'events',
             'warnings',
             'review',
