@@ -4,6 +4,7 @@ from apps.invigilation.models import (
     ProctorIntervention,
     ProctorDutySession,
     ProctorChatMessage,
+    ProctorReattemptAuthorization,
 )
 
 
@@ -44,3 +45,23 @@ class ProctorChatMessageAdmin(admin.ModelAdmin):
     list_filter = ('is_read', 'sent_at')
     search_fields = ('sender__email', 'recipient__email', 'message_text')
     readonly_fields = ('id', 'attempt', 'sender', 'recipient', 'message_text', 'sent_at')
+
+
+@admin.register(ProctorReattemptAuthorization)
+class ProctorReattemptAuthorizationAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 'student', 'assessment', 'status', 'reason',
+        'authorized_by', 'authorized_at', 'available_at', 'new_attempt'
+    )
+    list_filter = ('status', 'reason', 'authorized_at')
+    search_fields = ('student__email', 'assessment__title', 'authorized_by__email')
+    readonly_fields = [f.name for f in ProctorReattemptAuthorization._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
