@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply text-slate-900 font-semibold tracking-tight;
+  }
+
+  /* Default form input contrast */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="datetime-local"],
+  input[type="date"],
+  select,
+  textarea {
+    @apply text-slate-900 bg-white border-slate-300;
+  }
+
+  /* Universal high-contrast read-only and disabled input rules */
+  input:disabled,
+  textarea:disabled,
+  select:disabled,
+  input[readonly],
+  textarea[readonly] {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    background-color: #f8fafc !important;
+    opacity: 1 !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  /* Universal high-contrast placeholders */
+  ::placeholder,
+  ::-webkit-input-placeholder {
+    color: #64748b !important;
+    opacity: 1 !important;
+  }
+
+  /* Standard label contrast */
+  label {
+    @apply text-slate-700 font-medium;
+  }
+}
+
+@layer components {
+  /* Light theme card and surface utilities */
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid #e2e8f0;
+  }
+
+  /* Standard Table on Light Surface */
+  .admin-table-container {
+    @apply bg-white border border-slate-200/90 rounded-xl overflow-hidden shadow-sm;
+  }
+
+  .admin-table-head {
+    @apply bg-slate-50 text-slate-600 border-b border-slate-200 text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .admin-table-row {
+    @apply hover:bg-slate-50/80 transition-colors border-b border-slate-100 last:border-0 text-slate-700;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
