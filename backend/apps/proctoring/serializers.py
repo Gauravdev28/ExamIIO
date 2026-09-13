@@ -63,6 +63,24 @@ class StudentProctoringFrameUploadSerializer(serializers.Serializer):
         # 300 KB max frame size
         if value.size > 300 * 1024:
             raise serializers.ValidationError("Frame image size exceeds 300 KB limit.")
+        if value.size == 0:
+            raise serializers.ValidationError("Frame image cannot be empty.")
+
+        header = value.read(16)
+        value.seek(0)
+
+        # Magic byte validation: JPEG (\xff\xd8\xff), PNG (\x89PNG\r\n\x1a\n), WebP (RIFF....WEBP)
+        is_jpeg = header.startswith(b'\xff\xd8\xff')
+        is_png = header.startswith(b'\x89PNG\r\n\x1a\n')
+        is_webp = header.startswith(b'RIFF') and len(header) >= 12 and header[8:12] == b'WEBP'
+
+        if not (is_jpeg or is_png or is_webp):
+            raise serializers.ValidationError("Invalid image format. Only JPEG, PNG, or WebP images are permitted.")
+
+        # Reject executable or script payloads
+        if header.startswith((b'MZ', b'\x7fELF', b'#!', b'<?php', b'<script')):
+            raise serializers.ValidationError("Executable or script payloads are strictly prohibited.")
+
         return value
 
 
@@ -74,6 +92,26 @@ class StudentProctoringAudioUploadSerializer(serializers.Serializer):
         # 100 KB max audio snippet size
         if value.size > 100 * 1024:
             raise serializers.ValidationError("Audio snippet size exceeds 100 KB limit.")
+        if value.size == 0:
+            raise serializers.ValidationError("Audio file cannot be empty.")
+
+        header = value.read(16)
+        value.seek(0)
+
+        # Audio magic byte validation: WebM/Matroska (\x1a\x45\xdf\xa3), WAV (RIFF....WAVE), OGG (OggS), MP3 (ID3, \xff\xfb, \xff\xf3, \xff\xf2), AAC (\xff\xf1, \xff\xf9)
+        is_webm = header.startswith(b'\x1a\x45\xdf\xa3')
+        is_wav = header.startswith(b'RIFF') and len(header) >= 12 and header[8:12] == b'WAVE'
+        is_ogg = header.startswith(b'OggS')
+        is_mp3 = header.startswith(b'ID3') or header[:2] in (b'\xff\xfb', b'\xff\xf3', b'\xff\xf2')
+        is_aac = header[:2] in (b'\xff\xf1', b'\xff\xf9')
+
+        if not (is_webm or is_wav or is_ogg or is_mp3 or is_aac):
+            raise serializers.ValidationError("Invalid audio format. Only WebM, WAV, OGG, or MP3 audio streams are permitted.")
+
+        # Reject executable or script payloads
+        if header.startswith((b'MZ', b'\x7fELF', b'#!', b'<?php', b'<script')):
+            raise serializers.ValidationError("Executable or script payloads are strictly prohibited.")
+
         return value
 
 

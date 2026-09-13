@@ -807,6 +807,13 @@ class ImportService:
         if uploaded_file.size > cls.MAX_FILE_SIZE_BYTES:
             raise DRFValidationError(f"File size exceeds maximum allowed limit ({cls.MAX_FILE_SIZE_BYTES // (1024*1024)} MB).")
 
+        header = uploaded_file.read(16)
+        uploaded_file.seek(0)
+        if header.startswith((b'MZ', b'\x7fELF', b'#!', b'<?php', b'<script')):
+            raise DRFValidationError("Executable and script files are strictly prohibited.")
+        if filename.endswith('.xlsx') and not header.startswith(b'PK\x03\x04'):
+            raise DRFValidationError("Corrupted or invalid XLSX file format.")
+
         rows: List[Dict[str, str]] = []
 
         if filename.endswith('.csv'):

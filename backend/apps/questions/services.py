@@ -1,6 +1,6 @@
 import copy
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Union
 from django.db import transaction, IntegrityError
 from django.utils import timezone
 from django.core.exceptions import PermissionDenied

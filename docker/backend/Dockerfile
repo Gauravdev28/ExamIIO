@@ -23,7 +23,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
-COPY .env /app/.env
 COPY docker/backend/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh

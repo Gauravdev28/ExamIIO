@@ -45,6 +45,7 @@ pnpm-debug.log*
 
 # Environment & Secrets
 .env
+.env.*
 *.env
 !.env.example
 
@@ -59,6 +60,8 @@ pnpm-debug.log*
 .pytest_cache/
 .coverage
 htmlcov/
+celerybeat-schedule*
+*.sqlite3
 coverage.xml
 *.lcov
 

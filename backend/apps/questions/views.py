@@ -533,6 +533,36 @@ class AdminQuestionTemplateDownloadView(APIView):
         return response
 
 
+def _validate_question_upload_file(upload):
+    if not upload:
+        return "No file uploaded. Please upload a valid .xlsx spreadsheet based on CODEGUARD_Question_Import_Template_v1.xlsx."
+
+    MAX_SPREADSHEET_SIZE = 10 * 1024 * 1024
+    if upload.size > MAX_SPREADSHEET_SIZE:
+        return f"File size exceeds 10 MB maximum limit (received {round(upload.size / (1024*1024), 1)} MB)."
+
+    if upload.size == 0:
+        return "The uploaded file is empty."
+
+    filename = getattr(upload, 'name', '').lower()
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return "Invalid filename detected."
+
+    if not (filename.endswith('.xlsx') or filename.endswith('.csv')):
+        return "Invalid file format. Only .xlsx and .csv spreadsheets are accepted."
+
+    header = upload.read(16)
+    upload.seek(0)
+
+    if header.startswith((b'MZ', b'\x7fELF', b'#!', b'<?php', b'<script')):
+        return "Executable and script files are strictly prohibited."
+
+    if filename.endswith('.xlsx') and not header.startswith(b'PK\x03\x04'):
+        return "Corrupted or invalid XLSX file format."
+
+    return None
+
+
 class AdminQuestionSpreadsheetPreviewView(APIView):
     """
     Upload and parse Excel question file, producing canonical validation preview.
@@ -544,9 +574,10 @@ class AdminQuestionSpreadsheetPreviewView(APIView):
         from apps.questions.canonical import CanonicalExcelParser, CanonicalQuestionDTO
 
         upload = request.FILES.get('file')
-        if not upload:
+        validation_err = _validate_question_upload_file(upload)
+        if validation_err:
             return APIResponse(
-                error={"message": "No file uploaded. Please upload a valid .xlsx spreadsheet based on CODEGUARD_Question_Import_Template_v1.xlsx."},
+                error={"message": validation_err},
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
@@ -657,6 +688,12 @@ class AdminQuestionSpreadsheetConfirmView(APIView):
         raw_questions = request.data.get('questions') or request.data.get('rows')
 
         if upload:
+            val_err = _validate_question_upload_file(upload)
+            if val_err:
+                return APIResponse(
+                    error={"message": val_err},
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
             dtos, errors, warnings = CanonicalExcelParser.parse_workbook(upload)
             if errors:
                 return APIResponse(

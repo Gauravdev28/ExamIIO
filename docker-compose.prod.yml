@@ -1,6 +1,6 @@
 services:
   db:
-    image: mysql:8.0
+    image: mysql:8.0.40
     container_name: codeguard_db_prod
     restart: always
     environment:
@@ -14,10 +14,10 @@ services:
       - codeguard_prod_network
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.1-alpine
     container_name: codeguard_redis_prod
     restart: always
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-secure_redis_pass}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_prod_data:/data
     networks:
@@ -30,6 +30,9 @@ services:
     container_name: codeguard_backend_prod
     restart: always
     command: daphne -b 0.0.0.0 -p 8000 codeguard.asgi:application
+    environment:
+      - DJANGO_SETTINGS_MODULE=codeguard.settings.production
+      - DJANGO_ENV=production
     env_file:
       - .env
     depends_on:
@@ -45,6 +48,9 @@ services:
     container_name: codeguard_celery_worker_prod
     restart: always
     command: celery -A codeguard worker --loglevel=warning --concurrency=4
+    environment:
+      - DJANGO_SETTINGS_MODULE=codeguard.settings.production
+      - DJANGO_ENV=production
     env_file:
       - .env
     depends_on:
@@ -60,6 +66,9 @@ services:
     container_name: codeguard_celery_beat_prod
     restart: always
     command: celery -A codeguard beat --loglevel=warning
+    environment:
+      - DJANGO_SETTINGS_MODULE=codeguard.settings.production
+      - DJANGO_ENV=production
     env_file:
       - .env
     depends_on:
@@ -69,7 +78,7 @@ services:
       - codeguard_prod_network
 
   nginx:
-    image: nginx:1.25-alpine
+    image: nginx:1.25.5-alpine
     container_name: codeguard_nginx_prod
     restart: always
     ports:
@@ -78,7 +87,6 @@ services:
     volumes:
       - ./docker/frontend/nginx.conf:/etc/nginx/conf.d/default.conf
       - ./backend/staticfiles:/app/staticfiles
-      - ./backend/media:/app/media
     depends_on:
       - backend
     networks:
@@ -88,13 +96,13 @@ services:
   # Judge0 Community Edition (Internal Isolated Production Execution Stack)
   # ----------------------------------------------------------------------------
   judge0_db:
-    image: postgres:16-alpine
+    image: postgres:16.6-alpine
     container_name: codeguard_judge0_db_prod
     restart: always
     environment:
       POSTGRES_DB: judge0
       POSTGRES_USER: judge0
-      POSTGRES_PASSWORD: ${JUDGE0_POSTGRES_PASSWORD:-judge0_prod_secure_password}
+      POSTGRES_PASSWORD: ${JUDGE0_POSTGRES_PASSWORD}
     volumes:
       - judge0_prod_db_data:/var/lib/postgresql/data
     healthcheck:
@@ -106,14 +114,14 @@ services:
       - codeguard_prod_network
 
   judge0_redis:
-    image: redis:7-alpine
+    image: redis:7.4.1-alpine
     container_name: codeguard_judge0_redis_prod
     restart: always
-    command: ["redis-server", "--appendonly", "no", "--requirepass", "${JUDGE0_REDIS_PASSWORD:-judge0_prod_redis_pass}"]
+    command: ["redis-server", "--appendonly", "no", "--requirepass", "${JUDGE0_REDIS_PASSWORD}"]
     volumes:
       - judge0_prod_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${JUDGE0_REDIS_PASSWORD:-judge0_prod_redis_pass}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${JUDGE0_REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -130,11 +138,11 @@ services:
     environment:
       - REDIS_HOST=judge0_redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=${JUDGE0_REDIS_PASSWORD:-judge0_prod_redis_pass}
+      - REDIS_PASSWORD=${JUDGE0_REDIS_PASSWORD}
       - POSTGRES_HOST=judge0_db
       - POSTGRES_PORT=5432
       - POSTGRES_USER=judge0
-      - POSTGRES_PASSWORD=${JUDGE0_POSTGRES_PASSWORD:-judge0_prod_secure_password}
+      - POSTGRES_PASSWORD=${JUDGE0_POSTGRES_PASSWORD}
       - POSTGRES_DB=judge0
     depends_on:
       judge0_db:
@@ -155,11 +163,11 @@ services:
     environment:
       - REDIS_HOST=judge0_redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=${JUDGE0_REDIS_PASSWORD:-judge0_prod_redis_pass}
+      - REDIS_PASSWORD=${JUDGE0_REDIS_PASSWORD}
       - POSTGRES_HOST=judge0_db
       - POSTGRES_PORT=5432
       - POSTGRES_USER=judge0
-      - POSTGRES_PASSWORD=${JUDGE0_POSTGRES_PASSWORD:-judge0_prod_secure_password}
+      - POSTGRES_PASSWORD=${JUDGE0_POSTGRES_PASSWORD}
       - POSTGRES_DB=judge0
     depends_on:
       judge0:
@@ -175,12 +183,13 @@ services:
   # Piston Isolated Code Execution Stack (Multi-Language Production Sandbox)
   # ----------------------------------------------------------------------------
   piston:
-    image: ghcr.io/engineer-man/piston:latest
+    build:
+      context: .
+      dockerfile: docker/piston/Dockerfile
+    image: codeguard_piston:1.0.0
     container_name: codeguard_piston_prod
     restart: always
     privileged: true
-    ports:
-      - "2000:2000"
     volumes:
       - piston_prod_data:/piston/packages
     healthcheck:
@@ -195,11 +204,11 @@ services:
   # Dedicated SQL Sandbox MySQL Instance (Production Dedicated Tier)
   # ----------------------------------------------------------------------------
   mysql_sandbox:
-    image: mysql:8.0
+    image: mysql:8.0.40
     container_name: codeguard_mysql_sandbox_prod
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: ${SQL_SANDBOX_ADMIN_PASSWORD:-sandbox_root_secure_password}
+      MYSQL_ROOT_PASSWORD: ${SQL_SANDBOX_ADMIN_PASSWORD}
     volumes:
       - mysql_sandbox_prod_data:/var/lib/mysql
     networks:

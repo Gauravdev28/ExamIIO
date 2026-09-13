@@ -5,7 +5,10 @@ from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
 from channels.security.websocket import AllowedHostsOriginValidator
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'codeguard.settings.development')
+os.environ.setdefault(
+    'DJANGO_SETTINGS_MODULE',
+    'codeguard.settings.production' if os.getenv('DJANGO_ENV') == 'production' else 'codeguard.settings.development'
+)
 
 django_asgi_app = get_asgi_application()
 

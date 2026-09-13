@@ -80,8 +80,19 @@ class HealthCheckView(APIView):
                     }
 
         http_status = status.HTTP_200_OK if overall_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
-        health_status["status"] = "healthy" if overall_healthy else "degraded"
 
+        # For public unauthenticated callers, expose only high-level status without leaking infrastructure details
+        is_admin = request.user.is_authenticated and getattr(request.user, 'role', '') == 'ADMIN'
+        is_test = getattr(settings, 'TESTING', False)
+
+        if not (is_admin or is_test):
+            return APIResponse(
+                data={"status": "healthy" if overall_healthy else "degraded"},
+                message="System is operational" if overall_healthy else "System is experiencing degraded service",
+                status_code=http_status
+            )
+
+        health_status["status"] = "healthy" if overall_healthy else "degraded"
         return APIResponse(
             data=health_status,
             message="System is operational" if overall_healthy else "System is experiencing degraded service",

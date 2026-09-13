@@ -67,13 +67,13 @@ def custom_exception_handler(exc, context):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Unhandled 500 server errors
-        logger.error(f"Unhandled server exception: {exc}", exc_info=True)
+        logger.error(f"Unhandled server exception: {exc.__class__.__name__}", exc_info=True)
         return Response({
             "status": "error",
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
-                "message": "An unexpected server error occurred. Please contact system administrator.",
-                "details": str(exc) if hasattr(exc, '__str__') else None
+                "message": "An unexpected server error occurred.",
+                "details": None
             }
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -127,6 +127,12 @@ def custom_exception_handler(exc, context):
                 message = "; ".join(field_errors)
     elif isinstance(details, list) and len(details) > 0:
         message = "; ".join(str(e) for e in details)
+
+    # For any 5xx server errors, sanitize completely
+    if response.status_code >= 500:
+        error_code = "INTERNAL_SERVER_ERROR"
+        message = "An unexpected server error occurred."
+        details = None
 
     response.data = {
         "status": "error",

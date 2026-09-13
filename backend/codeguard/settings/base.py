@@ -145,7 +145,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.BasicAuthentication',
     ],
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
@@ -185,7 +184,21 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SAMESITE = 'Lax'
 
 # Redis and Channel Layers
-REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
+REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', '').strip()
+
+def _format_redis_url(url_str: str, password: str) -> str:
+    """Injects password into Redis URL if REDIS_PASSWORD is provided and not already present."""
+    if not password:
+        return url_str
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(url_str)
+    if parsed.password:
+        return url_str
+    host_port = parsed.netloc.split('@')[-1]
+    new_netloc = f":{password}@{host_port}"
+    return urlunparse(parsed._replace(netloc=new_netloc))
+
+REDIS_URL = _format_redis_url(os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0'), REDIS_PASSWORD)
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -196,8 +209,8 @@ CHANNEL_LAYERS = {
 }
 
 # Celery Broker & Results
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/1')
-CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://127.0.0.1:6379/2')
+CELERY_BROKER_URL = _format_redis_url(os.getenv('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/1'), REDIS_PASSWORD)
+CELERY_RESULT_BACKEND = _format_redis_url(os.getenv('CELERY_RESULT_BACKEND', 'redis://127.0.0.1:6379/2'), REDIS_PASSWORD)
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
