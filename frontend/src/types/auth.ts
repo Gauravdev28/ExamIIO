@@ -10,6 +10,7 @@ export interface User {
   is_primary?: boolean;
   is_primary_admin?: boolean;
   first_login_required?: boolean;
+  official_name_required?: boolean;
   admin_id?: string;
   display_name?: string;
   first_name?: string;
@@ -17,7 +18,9 @@ export interface User {
     id: string;
     roll_number: string;
     euid: string;
+    certificate_name?: string;
     first_login_required: boolean;
+    official_name_required?: boolean;
   };
   created_at: string;
   updated_at: string;

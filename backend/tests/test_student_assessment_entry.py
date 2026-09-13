@@ -3,8 +3,8 @@ from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.test import APITestCase
-from apps.accounts.models import User, Role
+from rest_framework.test import APITransactionTestCase
+from apps.accounts.models import User, Role, StudentProfile
 from apps.assessments.models import (
     Assessment,
     AssessmentStatus,
@@ -35,7 +35,7 @@ from apps.proctoring.services import (
 from apps.results.models import StudentCoinLedger
 
 
-class TestStudentAssessmentEntry(APITestCase):
+class TestStudentAssessmentEntry(APITransactionTestCase):
     def setUp(self):
         # 1. Create Users
         self.admin = User.objects.create_user(
@@ -53,6 +53,13 @@ class TestStudentAssessmentEntry(APITestCase):
             role=Role.STUDENT,
             is_active=True,
         )
+        StudentProfile.objects.create(
+            user=self.student1,
+            roll_number='ROLL-ENTRY-01',
+            euid='CG-ROLL-ENTRY-01',
+            certificate_name='Student One',
+            first_login_required=False,
+        )
 
         self.student2 = User.objects.create_user(
             email='student2_entry@test.com',
@@ -61,6 +68,13 @@ class TestStudentAssessmentEntry(APITestCase):
             role=Role.STUDENT,
             is_active=True,
         )
+        StudentProfile.objects.create(
+            user=self.student2,
+            roll_number='ROLL-ENTRY-02',
+            euid='CG-ROLL-ENTRY-02',
+            certificate_name='Student Two',
+            first_login_required=False,
+        )
 
         self.unassigned_student = User.objects.create_user(
             email='unassigned_entry@test.com',
@@ -68,6 +82,13 @@ class TestStudentAssessmentEntry(APITestCase):
             display_name='Unassigned Student',
             role=Role.STUDENT,
             is_active=True,
+        )
+        StudentProfile.objects.create(
+            user=self.unassigned_student,
+            roll_number='ROLL-ENTRY-03',
+            euid='CG-ROLL-ENTRY-03',
+            certificate_name='Unassigned Student',
+            first_login_required=False,
         )
 
         # 2. Create Published Questions

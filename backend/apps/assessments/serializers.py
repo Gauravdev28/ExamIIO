@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 from apps.questions.serializers import TagSerializer
 from .models import (
@@ -81,7 +82,7 @@ class AssessmentAdminListSerializer(serializers.ModelSerializer):
     assigned_count = serializers.SerializerMethodField()
     eligible_students_count = serializers.SerializerMethodField()
     target_sections_summary = serializers.SerializerMethodField()
-    created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+    created_by_email = serializers.SerializerMethodField()
 
     class Meta:
         model = Assessment
@@ -133,10 +134,16 @@ class AssessmentAdminListSerializer(serializers.ModelSerializer):
     def get_target_sections_summary(self, obj: Assessment):
         return list(obj.target_sections.values_list('code', flat=True))
 
+    def get_created_by_email(self, obj: Assessment):
+        try:
+            return obj.created_by.email if obj.created_by else None
+        except ObjectDoesNotExist:
+            return None
+
 
 class AssessmentAdminDetailSerializer(serializers.ModelSerializer):
     assessment_questions = AssessmentQuestionAdminSerializer(many=True, read_only=True)
-    created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+    created_by_email = serializers.SerializerMethodField()
     assigned_count = serializers.SerializerMethodField()
     eligible_students_count = serializers.SerializerMethodField()
     target_sections_summary = serializers.SerializerMethodField()
@@ -201,6 +208,12 @@ class AssessmentAdminDetailSerializer(serializers.ModelSerializer):
             "active_assigned": assigned_qs.filter(status=AssignmentStatus.ASSIGNED).count(),
             "revoked": assigned_qs.filter(status=AssignmentStatus.REVOKED).count(),
         }
+
+    def get_created_by_email(self, obj: Assessment):
+        try:
+            return obj.created_by.email if obj.created_by else None
+        except ObjectDoesNotExist:
+            return None
 
 
 class ConfigureAudienceSerializer(serializers.Serializer):

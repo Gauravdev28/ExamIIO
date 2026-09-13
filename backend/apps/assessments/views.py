@@ -10,7 +10,7 @@ from rest_framework.pagination import PageNumberPagination
 
 from apps.accounts.models import User, Role
 from apps.accounts.services import StudentService
-from apps.accounts.permissions import IsAdmin, IsActiveUser, IsStudent, IsFirstLoginSatisfied
+from apps.accounts.permissions import IsAdmin, IsActiveUser, IsStudent, IsFirstLoginSatisfied, IsOfficialNameSatisfied
 from apps.core.views import APIResponse
 from apps.questions.models import Question, QuestionVersion, VersionStatus
 from .models import (
@@ -75,7 +75,7 @@ class AdminAssessmentListView(APIView):
     pagination_class = StandardPagination
 
     def get(self, request):
-        queryset = Assessment.objects.prefetch_related('assessment_questions', 'assignments').select_related('created_by').all()
+        queryset = Assessment.objects.prefetch_related('assessment_questions', 'assignments').all()
 
         # Status filter
         status_filter = request.query_params.get('status')
@@ -145,7 +145,7 @@ class AdminAssessmentDetailView(APIView):
             Assessment.objects.prefetch_related(
                 'assessment_questions__question_version__tags',
                 'assignments__student__student_profile'
-            ).select_related('created_by'),
+            ),
             id=pk
         )
         return APIResponse(
@@ -477,7 +477,7 @@ class StudentAssessmentStartView(APIView):
     Start or Resume a Test Attempt.
     POST /api/v1/student/assessments/<id>/start/
     """
-    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied]
+    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied, IsOfficialNameSatisfied]
 
     def post(self, request, pk):
         attempt, created = AttemptService.start_attempt(
@@ -498,7 +498,7 @@ class StudentAttemptDetailView(APIView):
     Retrieve authoritative test attempt state, sanitized snapshot questions, and current answers.
     GET /api/v1/student/attempts/<id>/
     """
-    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied]
+    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied, IsOfficialNameSatisfied]
 
     def get(self, request, pk):
         attempt = get_object_or_404(
@@ -701,7 +701,7 @@ class StudentAttemptSaveAnswerView(APIView):
     Save or Autosave an answer for a specific question within an attempt.
     POST /api/v1/student/attempts/<id>/answers/<question_id>/
     """
-    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied]
+    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied, IsOfficialNameSatisfied]
 
     def post(self, request, pk, question_id):
         serializer = SaveAnswerPayloadSerializer(data=request.data)
@@ -731,7 +731,7 @@ class StudentAttemptSubmitView(APIView):
     Final submission of a test attempt.
     POST /api/v1/student/attempts/<id>/submit/
     """
-    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied]
+    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied, IsOfficialNameSatisfied]
 
     def post(self, request, pk):
         attempt = AttemptService.submit_attempt(
@@ -756,7 +756,7 @@ class StudentAttemptTerminateView(APIView):
     Authoritatively cancels and disqualifies the attempt, preventing re-entry and award of coins.
     POST /api/v1/student/attempts/<id>/terminate/
     """
-    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied]
+    permission_classes = [IsAuthenticated, IsActiveUser, IsStudent, IsFirstLoginSatisfied, IsOfficialNameSatisfied]
 
     def post(self, request, pk):
         reason = request.data.get('reason', 'EXAMINATION ABANDONED — BROWSER NAVIGATION / ROOM EXIT')

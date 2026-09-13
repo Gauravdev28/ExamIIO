@@ -20,6 +20,7 @@ from .serializers import (
     LoginSerializer,
     UserSerializer,
     StudentDetailSerializer,
+    UpdateStudentOfficialNameSerializer,
     CreateStudentSerializer,
     UpdateStudentSerializer,
     BulkImportConfirmSerializer,
@@ -227,6 +228,46 @@ class StudentProfileView(APIView):
         return APIResponse(
             data=serializer.data,
             message="Student profile retrieved."
+        )
+
+    def patch(self, request):
+        if not hasattr(request.user, 'student_profile'):
+            return APIResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                message="Student profile not found for this account."
+            )
+
+        serializer = UpdateStudentOfficialNameSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        profile = user.student_profile
+        clean_name = serializer.validated_data['clean_name']
+
+        with transaction.atomic():
+            profile.certificate_name = clean_name
+            profile.save(update_fields=['certificate_name', 'updated_at'])
+
+            user.display_name = clean_name
+            user.save(update_fields=['display_name', 'updated_at'])
+
+        AuditService.log(
+            action="STUDENT_OFFICIAL_NAME_UPDATED",
+            actor=user,
+            target_type="StudentProfile",
+            target_id=str(profile.id),
+            metadata={
+                "roll_number": profile.roll_number,
+                "euid": profile.euid,
+                "name_length": len(clean_name),
+            },
+            request=request
+        )
+
+        return APIResponse(
+            data=StudentDetailSerializer(profile).data,
+            message="Official name updated successfully.",
+            status_code=status.HTTP_200_OK
         )
 
 

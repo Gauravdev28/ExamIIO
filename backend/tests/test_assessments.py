@@ -8,7 +8,7 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from channels.testing import WebsocketCommunicator
 from channels.db import database_sync_to_async
 
-from apps.accounts.models import Role, AuditLog
+from apps.accounts.models import Role, AuditLog, StudentProfile
 from apps.questions.models import QuestionType, Difficulty, VersionStatus
 from apps.questions.services import QuestionService
 from apps.assessments.models import (
@@ -47,20 +47,36 @@ def admin_user(db):
 
 @pytest.fixture
 def student_user_1(db):
-    return User.objects.create_user(
+    user = User.objects.create_user(
         email="student1_assess@codeguard.local",
         password="StudentPass123!",
         role=Role.STUDENT
     )
+    StudentProfile.objects.create(
+        user=user,
+        roll_number="ROLL-ASSESS-01",
+        euid="CG-ROLL-ASSESS-01",
+        certificate_name="Student One",
+        first_login_required=False,
+    )
+    return user
 
 
 @pytest.fixture
 def student_user_2(db):
-    return User.objects.create_user(
+    user = User.objects.create_user(
         email="student2_assess@codeguard.local",
         password="StudentPass123!",
         role=Role.STUDENT
     )
+    StudentProfile.objects.create(
+        user=user,
+        roll_number="ROLL-ASSESS-02",
+        euid="CG-ROLL-ASSESS-02",
+        certificate_name="Student Two",
+        first_login_required=False,
+    )
+    return user
 
 
 @pytest.fixture

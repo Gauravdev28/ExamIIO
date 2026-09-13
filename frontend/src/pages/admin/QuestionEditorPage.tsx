@@ -342,7 +342,7 @@ export const QuestionEditorPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 py-8">
+    <div className="py-8">
       <div className="max-w-5xl mx-auto px-4">
         {/* Page Header */}
         <div className="mb-6 flex items-center justify-between">

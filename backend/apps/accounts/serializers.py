@@ -1,6 +1,8 @@
+import unicodedata
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
 from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from .models import User, StudentProfile, Role, AuditLog, Section
@@ -52,6 +54,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
     Representation of the student profile entity.
     """
     section = SectionSerializer(read_only=True)
+    official_name_required = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentProfile
@@ -62,10 +65,15 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             'euid',
             'first_login_required',
             'certificate_name',
+            'official_name_required',
             'created_at',
             'updated_at',
         ]
         read_only_fields = fields
+
+    def get_official_name_required(self, obj: StudentProfile) -> bool:
+        name = obj.certificate_name or ''
+        return not bool(name.strip())
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -75,6 +83,7 @@ class UserSerializer(serializers.ModelSerializer):
     """
     student_profile = StudentProfileSerializer(read_only=True)
     first_login_required = serializers.SerializerMethodField()
+    official_name_required = serializers.SerializerMethodField()
     admin_id = serializers.CharField(read_only=True)
     display_name = serializers.CharField(read_only=True)
     first_name = serializers.CharField(read_only=True)
@@ -92,6 +101,7 @@ class UserSerializer(serializers.ModelSerializer):
             'is_primary',
             'is_primary_admin',
             'first_login_required',
+            'official_name_required',
             'student_profile',
             'admin_id',
             'display_name',
@@ -105,6 +115,18 @@ class UserSerializer(serializers.ModelSerializer):
         if obj.role == Role.STUDENT and hasattr(obj, 'student_profile') and obj.student_profile:
             return obj.student_profile.first_login_required or getattr(obj, 'first_login_required', False)
         return getattr(obj, 'first_login_required', False)
+
+    def get_official_name_required(self, obj: User) -> bool:
+        if obj.role == Role.STUDENT:
+            try:
+                profile = getattr(obj, 'student_profile', None)
+            except ObjectDoesNotExist:
+                profile = None
+            if profile:
+                name = profile.certificate_name or ''
+                return not bool(name.strip())
+            return True
+        return False
 
     def get_is_primary(self, obj: User) -> bool:
         return getattr(obj, 'is_primary_admin', False)
@@ -317,6 +339,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     coins = serializers.SerializerMethodField()
     section = SectionSerializer(read_only=True)
     section_id = serializers.UUIDField(source='section.id', read_only=True, allow_null=True)
+    official_name_required = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentProfile
@@ -337,10 +360,15 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             'is_active',
             'first_login_required',
             'certificate_name',
+            'official_name_required',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'user_id', 'role', 'roll_number', 'euid', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user_id', 'role', 'roll_number', 'euid', 'created_at', 'updated_at', 'official_name_required']
+
+    def get_official_name_required(self, obj: StudentProfile) -> bool:
+        name = obj.certificate_name or ''
+        return not bool(name.strip())
 
     def get_name(self, obj: StudentProfile) -> str:
         if obj.certificate_name:
@@ -360,6 +388,55 @@ class StudentDetailSerializer(serializers.ModelSerializer):
         from django.db.models import Sum
         val = StudentCoinLedger.objects.filter(student_id=obj.user_id).aggregate(total=Sum('coins_awarded'))['total']
         return val or 0
+
+
+class UpdateStudentOfficialNameSerializer(serializers.Serializer):
+    """
+    Strictly scoped serializer for student self-service official name update.
+    Allows only official_name (or certificate_name alias) to be updated.
+    """
+    official_name = serializers.CharField(required=False, allow_blank=True)
+    certificate_name = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        raw_name = attrs.get('official_name')
+        if raw_name is None:
+            raw_name = attrs.get('certificate_name')
+
+        if raw_name is None:
+            raise serializers.ValidationError({
+                "official_name": "Official full name is required."
+            })
+
+        if not isinstance(raw_name, str):
+            raise serializers.ValidationError({
+                "official_name": "Official name must be a valid text string."
+            })
+
+        clean_name = raw_name.strip()
+        if not clean_name:
+            raise serializers.ValidationError({
+                "official_name": "Official name cannot be empty or whitespace-only."
+            })
+
+        if len(clean_name) < 2:
+            raise serializers.ValidationError({
+                "official_name": "Official name must be at least 2 characters in length."
+            })
+
+        if len(clean_name) > 255:
+            raise serializers.ValidationError({
+                "official_name": "Official name cannot exceed 255 characters."
+            })
+
+        for c in clean_name:
+            if unicodedata.category(c) in ('Cc', 'Cs') or ord(c) < 32 or (127 <= ord(c) <= 159):
+                raise serializers.ValidationError({
+                    "official_name": "Official name cannot contain control characters."
+                })
+
+        attrs['clean_name'] = clean_name
+        return attrs
 
 
 class CreateStudentSerializer(serializers.Serializer):

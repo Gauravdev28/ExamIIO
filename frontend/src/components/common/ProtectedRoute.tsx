@@ -33,7 +33,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-600">
+      <div className="min-h-screen flex items-center justify-center bg-[#F4F1EA] text-[#5E6B7D]">
         <div className="flex flex-col items-center gap-3">
           <svg className="animate-spin h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -89,6 +89,13 @@ export const ProctorRoute: React.FC<{ children: React.ReactNode }> = ({ children
   <ProtectedRoute requiredRole="PROCTOR">{children}</ProtectedRoute>
 );
 
-export const StudentRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <ProtectedRoute requiredRole="STUDENT">{children}</ProtectedRoute>
-);
+export const StudentRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+  const location = useLocation();
+
+  if (user?.role === 'STUDENT' && user?.official_name_required && location.pathname.startsWith('/student/room/')) {
+    return <Navigate to="/student/dashboard" replace />;
+  }
+
+  return <ProtectedRoute requiredRole="STUDENT">{children}</ProtectedRoute>;
+};

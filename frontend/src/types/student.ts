@@ -13,6 +13,7 @@ export interface StudentProfile {
   certificate_name?: string;
   is_active: boolean;
   first_login_required: boolean;
+  official_name_required?: boolean;
   coins?: number;
   section?: Section | null;
   created_at: string;

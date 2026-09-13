@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
-from django.core.exceptions import PermissionDenied, ValidationError as DjangoValidationError
+from django.core.exceptions import PermissionDenied, ValidationError as DjangoValidationError, ObjectDoesNotExist
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
 from apps.accounts.models import AuditLog, User, Role, Section, StudentProfile
@@ -396,15 +396,23 @@ class AssessmentSnapshotService:
         )
         snapshot.refresh_from_db()
 
+        audit_actor = actor
+        if not audit_actor:
+            try:
+                audit_actor = assessment.created_by
+            except ObjectDoesNotExist:
+                audit_actor = None
+
         AuditService.log(
             action="SNAPSHOT_CREATED",
-            actor=actor or assessment.created_by,
+            actor=audit_actor,
             target_type="AssessmentSnapshot",
             target_id=str(snapshot.id),
             metadata={
                 "assessment_id": str(assessment.id),
                 "question_count": len(student_questions_list),
-                "total_points": assessment.total_points
+                "total_points": assessment.total_points,
+                "created_by_id": str(assessment.created_by_id) if getattr(assessment, 'created_by_id', None) else None,
             },
             request=request
         )

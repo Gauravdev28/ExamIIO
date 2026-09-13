@@ -114,6 +114,15 @@ export const fetchStudentSelfProfile = async (): Promise<APIResponse<StudentProf
   return response.data;
 };
 
+export const updateStudentOfficialName = async (
+  officialName: string
+): Promise<APIResponse<StudentProfile>> => {
+  const response = await apiClient.patch<APIResponse<StudentProfile>>('/student/profile/', {
+    official_name: officialName,
+  });
+  return response.data;
+};
+
 export const changeUserPassword = async (
   payload: ChangePasswordPayload
 ): Promise<APIResponse<User>> => {

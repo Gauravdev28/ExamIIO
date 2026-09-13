@@ -40,6 +40,7 @@ import {
   AuthenticatedRoute 
 } from './components/common/ProtectedRoute';
 import { ForcePasswordChangeModal } from './components/auth/ForcePasswordChangeModal';
+import { OfficialNameSetupModal } from './components/auth/OfficialNameSetupModal';
 import { SessionTimeoutManager } from './components/auth/SessionTimeoutManager';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
@@ -52,6 +53,8 @@ const AuthenticatedAppLayout: React.FC = () => {
     return (
       <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-900">
         <SessionTimeoutManager />
+        <ForcePasswordChangeModal />
+        <OfficialNameSetupModal />
         <ErrorBoundary fallbackTitle="Exam Room Error">
           <Outlet />
         </ErrorBoundary>
@@ -60,16 +63,17 @@ const AuthenticatedAppLayout: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 selection:bg-brand-500/20 selection:text-brand-900">
+    <div className="min-h-screen flex flex-col bg-[#F4F1EA] text-[#243247] selection:bg-[#2878D8]/20 selection:text-[#243247]">
       <Navbar />
       <SessionTimeoutManager />
       <ForcePasswordChangeModal />
+      <OfficialNameSetupModal />
       <main className="flex-1">
         <ErrorBoundary fallbackTitle="Page Load Error">
           <Outlet />
         </ErrorBoundary>
       </main>
-      <footer className="border-t border-[#DDD8CE] bg-white py-6 text-center text-xs text-[#5E6B7D] font-medium">
+      <footer className="border-t border-[#DDD8CE] bg-[#E8E4DC] py-6 text-center text-xs text-[#5E6B7D] font-medium">
         ExamIIO &copy; {new Date().getFullYear()}
       </footer>
     </div>

@@ -1,3 +1,4 @@
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework.permissions import BasePermission
 from .models import Role
 
@@ -59,3 +60,30 @@ class IsFirstLoginSatisfied(BasePermission):
         if user.role == Role.STUDENT and hasattr(user, 'student_profile'):
             return not user.student_profile.first_login_required
         return True
+
+
+class IsOfficialNameSatisfied(BasePermission):
+    """
+    Enforces that students have configured their official certificate name
+    before accessing live examination environments or starting test attempts.
+    """
+    message = "Official full name setup is mandatory before accessing assessments."
+    code = "OFFICIAL_NAME_REQUIRED"
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated or not user.is_active:
+            return False
+
+        if user.role != Role.STUDENT:
+            return True
+
+        try:
+            profile = getattr(user, 'student_profile', None)
+        except ObjectDoesNotExist:
+            profile = None
+
+        if not profile:
+            return False
+
+        return bool((profile.certificate_name or '').strip())
