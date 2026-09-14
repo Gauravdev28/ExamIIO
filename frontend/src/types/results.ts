@@ -163,6 +163,17 @@ export interface Certificate {
   created_at: string;
 }
 
+export interface AssessmentCertificateSummary {
+  id: string;
+  title: string;
+  status: string;
+  certificate_count: number;
+  duration_minutes: number;
+  total_points: string;
+  start_datetime: string | null;
+  end_datetime: string | null;
+}
+
 export interface PublicCertificateVerification {
   certificate_id: string;
   printed_name: string;

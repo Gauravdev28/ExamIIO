@@ -178,6 +178,14 @@ export const App: React.FC = () => {
               }
             />
             <Route
+              path="/admin/assessments/:assessmentId/certificates"
+              element={
+                <AdminRoute>
+                  <AdminCertificatesPage />
+                </AdminRoute>
+              }
+            />
+            <Route
               path="/admin/questions"
               element={
                 <AdminRoute>

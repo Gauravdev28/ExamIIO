@@ -20,6 +20,8 @@ from .views import (
     StudentCertificateDetailView,
     StudentCertificateDownloadView,
     AdminCertificateListView,
+    AdminCertificateAssessmentSummaryView,
+    AdminAssessmentCertificateListView,
     AdminCertificateDetailView,
     AdminCertificateRetryView,
     AdminCertificateDownloadView,
@@ -58,8 +60,12 @@ urlpatterns = [
     path('admin/reports/<uuid:pk>/', AdminReportDetailView.as_view(), name='admin-report-detail'),
     path('admin/reports/<uuid:pk>/download/', AdminReportDownloadView.as_view(), name='admin-report-download'),
 
+    # Admin Assessment Certificates Endpoint
+    path('admin/assessments/<uuid:assessment_id>/certificates/', AdminAssessmentCertificateListView.as_view(), name='admin-assessment-certificates'),
+
     # Admin Certificate Endpoints
     path('admin/certificates/', AdminCertificateListView.as_view(), name='admin-certificate-list'),
+    path('admin/certificates/assessments/', AdminCertificateAssessmentSummaryView.as_view(), name='admin-certificate-assessments-summary'),
     path('admin/certificates/<uuid:pk>/', AdminCertificateDetailView.as_view(), name='admin-certificate-detail'),
     path('admin/certificates/<uuid:pk>/retry/', AdminCertificateRetryView.as_view(), name='admin-certificate-retry'),
     path('admin/certificates/<uuid:pk>/download/', AdminCertificateDownloadView.as_view(), name='admin-certificate-download'),

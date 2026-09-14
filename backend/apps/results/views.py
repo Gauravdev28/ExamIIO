@@ -3,7 +3,7 @@ import hashlib
 from decimal import Decimal
 from django.shortcuts import get_object_or_404
 from django.http import FileResponse, Http404
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.utils import timezone
 from django.conf import settings
 from rest_framework import status
@@ -840,6 +840,85 @@ class AdminCertificateListView(APIView):
         page = paginator.paginate_queryset(queryset, request)
         serializer = CertificateSerializer(page, many=True, context={'request': request})
         return paginator.get_paginated_response(serializer.data)
+
+
+class AdminCertificateAssessmentSummaryView(APIView):
+    """
+    List assessments that have certificates, including total certificate counts.
+    Single aggregation query using Count('certificates') to eliminate N+1 queries.
+    GET /api/v1/admin/certificates/assessments/
+    """
+    permission_classes = [IsAuthenticated, IsActiveUser, IsAdmin]
+
+    def get(self, request):
+        queryset = Assessment.objects.annotate(
+            certificate_count=Count('certificates')
+        ).filter(
+            certificate_count__gt=0
+        ).order_by('-created_at')
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search) |
+                Q(description__icontains=search)
+            )
+
+        data = [
+            {
+                'id': str(a.id),
+                'title': a.title,
+                'status': a.status,
+                'certificate_count': a.certificate_count,
+                'duration_minutes': a.duration_minutes,
+                'total_points': str(a.total_points),
+                'start_datetime': a.start_datetime.isoformat() if a.start_datetime else None,
+                'end_datetime': a.end_datetime.isoformat() if a.end_datetime else None,
+            }
+            for a in queryset
+        ]
+        return APIResponse(data=data, message="Assessment certificate summary retrieved.")
+
+
+class AdminAssessmentCertificateListView(APIView):
+    """
+    List certificates strictly scoped to a specific assessment.
+    GET /api/v1/admin/assessments/<assessment_id>/certificates/
+    """
+    permission_classes = [IsAuthenticated, IsActiveUser, IsAdmin]
+
+    def get(self, request, assessment_id):
+        assessment = get_object_or_404(Assessment, id=assessment_id)
+
+        queryset = Certificate.objects.filter(
+            exam=assessment
+        ).select_related(
+            'exam', 'student', 'attempt'
+        ).order_by('-created_at')
+
+        status_filter = request.query_params.get('status')
+        if status_filter and status_filter.upper() in CertificateStatus.values:
+            queryset = queryset.filter(status=status_filter.upper())
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(student__email__icontains=search) |
+                Q(printed_name__icontains=search) |
+                Q(certificate_id__icontains=search)
+            )
+
+        paginator = StandardResultsPagination()
+        page = paginator.paginate_queryset(queryset, request)
+        serializer = CertificateSerializer(page, many=True, context={'request': request})
+        response = paginator.get_paginated_response(serializer.data)
+        response.data['assessment'] = {
+            'id': str(assessment.id),
+            'title': assessment.title,
+            'status': assessment.status,
+            'total_certificates': assessment.certificates.count(),
+        }
+        return response
 
 
 class AdminCertificateDetailView(APIView):

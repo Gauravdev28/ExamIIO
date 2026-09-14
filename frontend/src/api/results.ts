@@ -6,6 +6,7 @@ import {
   StudentTopicPerformance,
   ReportJob,
   Certificate,
+  AssessmentCertificateSummary,
   PublicCertificateVerification,
   AdminCandidateResultDetail,
 } from '../types/results';
@@ -169,6 +170,29 @@ export const ResultsAPI = {
   },
 
   // Participation Certificates (Admin)
+  getAdminCertificateAssessmentSummary: async (params?: {
+    search?: string;
+  }): Promise<AssessmentCertificateSummary[]> => {
+    const response = await api.get('/admin/certificates/assessments/', { params });
+    return response.data.data;
+  },
+
+  getAdminAssessmentCertificates: async (
+    assessmentId: string,
+    params?: {
+      page?: number;
+      status?: string;
+      search?: string;
+    }
+  ): Promise<
+    PaginatedResponse<Certificate> & {
+      assessment?: { id: string; title: string; status: string; total_certificates: number };
+    }
+  > => {
+    const response = await api.get(`/admin/assessments/${assessmentId}/certificates/`, { params });
+    return response.data;
+  },
+
   getAdminCertificates: async (params?: {
     page?: number;
     exam_id?: string;
