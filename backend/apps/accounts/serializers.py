@@ -399,6 +399,16 @@ class UpdateStudentOfficialNameSerializer(serializers.Serializer):
     certificate_name = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
+        # Reject non-string JSON data types (e.g. int, float, bool) before CharField coercion
+        if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict):
+            for field in ('official_name', 'certificate_name'):
+                if field in self.initial_data:
+                    raw_input = self.initial_data[field]
+                    if raw_input is not None and not isinstance(raw_input, str):
+                        raise serializers.ValidationError({
+                            "official_name": "Official name must be a valid text string."
+                        })
+
         raw_name = attrs.get('official_name')
         if raw_name is None:
             raw_name = attrs.get('certificate_name')
