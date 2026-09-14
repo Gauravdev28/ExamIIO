@@ -30,6 +30,8 @@ import { Tabs, TabItem } from '../../components/common/Tabs';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { ResultsAPI } from '../../api/results';
+import { getAdminAssessments } from '../../api/assessments';
+import { AssessmentAdminItem } from '../../types/assessment';
 import {
   AssessmentResult,
   AssessmentAnalytics,
@@ -40,6 +42,13 @@ import {
 export const AdminAssessmentResultsPage: React.FC = () => {
   const { assessmentId } = useParams<{ assessmentId: string }>();
   const navigate = useNavigate();
+
+  // Assessment Selection State
+  const [assessments, setAssessments] = useState<AssessmentAdminItem[]>([]);
+  const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>('');
+  const [loadingAssessments, setLoadingAssessments] = useState<boolean>(true);
+
+  const effectiveAssessmentId = assessmentId || selectedAssessmentId;
 
   const [activeTab, setActiveTab] = useState<'roster' | 'analytics' | 'questions' | 'reports'>('roster');
   const [loading, setLoading] = useState(true);
@@ -64,14 +73,48 @@ export const AdminAssessmentResultsPage: React.FC = () => {
   const [reportJob, setReportJob] = useState<ReportJob | null>(null);
   const [generatingReport, setGeneratingReport] = useState(false);
 
+  // Fetch assessments list for selector / default selection
   useEffect(() => {
-    if (assessmentId) {
+    let isMounted = true;
+    const fetchAssessments = async () => {
+      setLoadingAssessments(true);
+      try {
+        const res = await getAdminAssessments({ page_size: 100 });
+        if (!isMounted) return;
+        if (res.data && res.data.results) {
+          setAssessments(res.data.results);
+          if (!assessmentId && res.data.results.length > 0) {
+            setSelectedAssessmentId(res.data.results[0].id);
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to load assessments list:', err);
+      } finally {
+        if (isMounted) {
+          setLoadingAssessments(false);
+        }
+      }
+    };
+
+    fetchAssessments();
+    return () => {
+      isMounted = false;
+    };
+  }, [assessmentId]);
+
+  useEffect(() => {
+    if (effectiveAssessmentId) {
       loadTabData();
+    } else if (!loadingAssessments) {
+      setLoading(false);
     }
-  }, [assessmentId, activeTab, page, passFilter, statusFilter]);
+  }, [effectiveAssessmentId, activeTab, page, passFilter, statusFilter, loadingAssessments]);
 
   const loadTabData = async () => {
-    if (!assessmentId) return;
+    if (!effectiveAssessmentId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -81,14 +124,14 @@ export const AdminAssessmentResultsPage: React.FC = () => {
         if (passFilter === 'pass') params.is_passed = true;
         if (passFilter === 'fail') params.is_passed = false;
         if (statusFilter !== 'all') params.status = statusFilter;
-        const res = await ResultsAPI.getAdminAssessmentResults(assessmentId, params);
+        const res = await ResultsAPI.getAdminAssessmentResults(effectiveAssessmentId, params);
         setResults(res.results);
         setTotalCount(res.count);
       } else if (activeTab === 'analytics') {
-        const data = await ResultsAPI.getAdminAssessmentAnalytics(assessmentId);
+        const data = await ResultsAPI.getAdminAssessmentAnalytics(effectiveAssessmentId);
         setAnalytics(data);
       } else if (activeTab === 'questions') {
-        const data = await ResultsAPI.getAdminQuestionAnalytics(assessmentId);
+        const data = await ResultsAPI.getAdminQuestionAnalytics(effectiveAssessmentId);
         setQuestions(data);
       }
     } catch (err: any) {
@@ -105,10 +148,10 @@ export const AdminAssessmentResultsPage: React.FC = () => {
   };
 
   const handleReleaseResults = async () => {
-    if (!assessmentId || !confirm("Are you sure you want to release results to all candidates?")) return;
+    if (!effectiveAssessmentId || !confirm("Are you sure you want to release results to all candidates?")) return;
     setReleasing(true);
     try {
-      const res = await ResultsAPI.releaseAdminAssessmentResults(assessmentId);
+      const res = await ResultsAPI.releaseAdminAssessmentResults(effectiveAssessmentId);
       alert(`Successfully released ${res.released_count} results to candidates.`);
       loadTabData();
     } catch (err: any) {
@@ -119,10 +162,10 @@ export const AdminAssessmentResultsPage: React.FC = () => {
   };
 
   const handleGenerateReport = async () => {
-    if (!assessmentId) return;
+    if (!effectiveAssessmentId) return;
     setGeneratingReport(true);
     try {
-      const job = await ResultsAPI.createAdminReport(assessmentId, reportType, reportFormat);
+      const job = await ResultsAPI.createAdminReport(effectiveAssessmentId, reportType, reportFormat);
       setReportJob(job);
 
       const pollInterval = setInterval(async () => {
@@ -191,10 +234,37 @@ export const AdminAssessmentResultsPage: React.FC = () => {
           </h1>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {assessments.length > 0 && (
+            <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-1.5 shadow-sm">
+              <label htmlFor="results-assessment-select" className="text-xs font-bold text-slate-600 whitespace-nowrap">
+                Assessment:
+              </label>
+              <select
+                id="results-assessment-select"
+                value={effectiveAssessmentId}
+                onChange={(e) => {
+                  const newId = e.target.value;
+                  setSelectedAssessmentId(newId);
+                  setPage(1);
+                  if (assessmentId) {
+                    navigate(`/admin/assessments/${newId}/results`);
+                  }
+                }}
+                className="bg-transparent text-slate-900 text-xs sm:text-sm font-semibold outline-none max-w-xs cursor-pointer truncate"
+              >
+                {assessments.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button
             onClick={handleReleaseResults}
-            disabled={releasing}
+            disabled={releasing || !effectiveAssessmentId}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold text-xs sm:text-sm rounded-lg shadow-sm transition"
           >
             {releasing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
@@ -204,21 +274,50 @@ export const AdminAssessmentResultsPage: React.FC = () => {
       </div>
 
       {error && (
-        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-3 text-sm">
-          <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
-          <span>{error}</span>
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={() => loadTabData()}
+            className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-semibold rounded-lg transition"
+          >
+            Retry
+          </button>
         </div>
       )}
 
-      {/* Tab Navigation */}
-      <Tabs
-        tabs={resultTabs}
-        activeTab={activeTab}
-        onChange={(t) => {
-          setActiveTab(t as any);
-          setPage(1);
-        }}
-      />
+      {loadingAssessments && !effectiveAssessmentId ? (
+        <div className="flex flex-col items-center justify-center p-16 space-y-3 bg-white rounded-xl border border-slate-200">
+          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+          <span className="text-sm font-medium text-slate-600">Loading assessments...</span>
+        </div>
+      ) : assessments.length === 0 && !loadingAssessments && !effectiveAssessmentId ? (
+        <div className="text-center p-12 bg-white rounded-xl border border-slate-200 text-slate-600 space-y-4 shadow-sm">
+          <HelpCircle className="w-12 h-12 text-slate-400 mx-auto" />
+          <div>
+            <h3 className="text-base font-bold text-slate-800">No Assessments Available</h3>
+            <p className="text-xs text-slate-500 mt-1">There are currently no assessments created in the system.</p>
+          </div>
+          <button
+            onClick={() => navigate('/admin/assessments')}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition inline-flex items-center gap-2"
+          >
+            Go to Assessments
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Tab Navigation */}
+          <Tabs
+            tabs={resultTabs}
+            activeTab={activeTab}
+            onChange={(t) => {
+              setActiveTab(t as any);
+              setPage(1);
+            }}
+          />
 
       {/* Tab 1: Candidate Roster */}
       {activeTab === 'roster' && (
@@ -372,7 +471,7 @@ export const AdminAssessmentResultsPage: React.FC = () => {
                         <td className="py-3.5 px-4 text-right">
                           {canReview ? (
                             <button
-                              onClick={() => navigate(`/admin/assessments/${assessmentId}/results/${r.id}`)}
+                              onClick={() => navigate(`/admin/assessments/${effectiveAssessmentId}/results/${r.id}`)}
                               className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold transition"
                             >
                               Review
@@ -414,146 +513,166 @@ export const AdminAssessmentResultsPage: React.FC = () => {
       )}
 
       {/* Tab 2: Cohort Analytics */}
-      {activeTab === 'analytics' && analytics && (
-        <div className="space-y-8">
-          {/* KPI Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card className="p-5">
-              <div className="text-xs text-slate-600 font-semibold">Completion Rate</div>
-              <div className="text-2xl font-black text-slate-900 mt-1">
-                {analytics.cohort_metrics.completion_rate_percentage}%
-              </div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {analytics.cohort_metrics.total_completed} / {analytics.cohort_metrics.total_assigned} Students
+      {activeTab === 'analytics' && (
+        loading ? (
+          <div className="flex justify-center p-12 bg-white rounded-xl border border-slate-200 shadow-sm">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+          </div>
+        ) : analytics ? (
+          <div className="space-y-8">
+            {/* KPI Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="p-5">
+                <div className="text-xs text-slate-600 font-semibold">Completion Rate</div>
+                <div className="text-2xl font-black text-slate-900 mt-1">
+                  {analytics.cohort_metrics.completion_rate_percentage}%
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {analytics.cohort_metrics.total_completed} / {analytics.cohort_metrics.total_assigned} Students
+                </div>
+              </Card>
+
+              <Card className="p-5">
+                <div className="text-xs text-slate-600 font-semibold">Pass Rate</div>
+                <div className="text-2xl font-black text-emerald-700 mt-1">
+                  {analytics.cohort_metrics.pass_rate_percentage}%
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">Threshold met</div>
+              </Card>
+
+              <Card className="p-5">
+                <div className="text-xs text-slate-600 font-semibold">Cohort Mean Score</div>
+                <div className="text-2xl font-black text-emerald-700 mt-1">
+                  {analytics.score_statistics.mean_score}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">Median: {analytics.score_statistics.median_score}</div>
+              </Card>
+
+              <Card className="p-5">
+                <div className="text-xs text-slate-600 font-semibold">Standard Deviation</div>
+                <div className="text-2xl font-black text-slate-900 mt-1">
+                  {analytics.score_statistics.standard_deviation}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  Range: {analytics.score_statistics.lowest_score} – {analytics.score_statistics.highest_score}
+                </div>
+              </Card>
+            </div>
+
+            {/* Score Distribution Histogram */}
+            <Card className="p-6">
+              <h2 className="text-lg font-bold text-slate-900 mb-6">Score Distribution Histogram</h2>
+              <div className="h-72 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={analytics.score_distribution}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.8} />
+                    <XAxis dataKey="bucket" stroke="#64748b" fontSize={12} />
+                    <YAxis stroke="#64748b" fontSize={12} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '0.75rem', color: '#0f172a' }}
+                      labelStyle={{ color: '#0f172a', fontWeight: 'bold' }}
+                    />
+                    <Bar dataKey="count" fill="#059669" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </Card>
 
-            <Card className="p-5">
-              <div className="text-xs text-slate-600 font-semibold">Pass Rate</div>
-              <div className="text-2xl font-black text-emerald-700 mt-1">
-                {analytics.cohort_metrics.pass_rate_percentage}%
-              </div>
-              <div className="text-xs text-slate-500 mt-0.5">Threshold met</div>
-            </Card>
+            {/* Proctoring Risk Correlation Safeguard */}
+            <Card className="p-6">
+              <h2 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-emerald-600" /> Informational Proctoring Risk Correlation
+              </h2>
+              <p className="text-xs text-slate-500 mb-4">
+                Informational context only. Risk scores represent statistical anomalies, never disciplinary proof.
+              </p>
 
-            <Card className="p-5">
-              <div className="text-xs text-slate-600 font-semibold">Cohort Mean Score</div>
-              <div className="text-2xl font-black text-emerald-700 mt-1">
-                {analytics.score_statistics.mean_score}
-              </div>
-              <div className="text-xs text-slate-500 mt-0.5">Median: {analytics.score_statistics.median_score}</div>
-            </Card>
-
-            <Card className="p-5">
-              <div className="text-xs text-slate-600 font-semibold">Standard Deviation</div>
-              <div className="text-2xl font-black text-slate-900 mt-1">
-                {analytics.score_statistics.standard_deviation}
-              </div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                Range: {analytics.score_statistics.lowest_score} – {analytics.score_statistics.highest_score}
-              </div>
+              {analytics.proctoring_risk_correlation.is_available && analytics.proctoring_risk_correlation.distribution ? (
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  {Object.entries(analytics.proctoring_risk_correlation.distribution).map(([band, val]) => (
+                    <div key={band} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <div className="text-xs font-bold text-slate-700">{band}</div>
+                      <div className="text-lg font-black text-slate-900 mt-1">{val.count} students</div>
+                      <div className="text-xs text-emerald-700 font-semibold mt-0.5">Avg Score: {val.average_score}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span>
+                    {analytics.proctoring_risk_correlation.reason ||
+                      'Proctoring aggregate distribution withheld to safeguard privacy (requires cohort N ≥ 10).'}
+                  </span>
+                </div>
+              )}
             </Card>
           </div>
-
-          {/* Score Distribution Histogram */}
-          <Card className="p-6">
-            <h2 className="text-lg font-bold text-slate-900 mb-6">Score Distribution Histogram</h2>
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={analytics.score_distribution}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.8} />
-                  <XAxis dataKey="bucket" stroke="#64748b" fontSize={12} />
-                  <YAxis stroke="#64748b" fontSize={12} allowDecimals={false} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '0.75rem', color: '#0f172a' }}
-                    labelStyle={{ color: '#0f172a', fontWeight: 'bold' }}
-                  />
-                  <Bar dataKey="count" fill="#059669" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-
-          {/* Proctoring Risk Correlation Safeguard */}
-          <Card className="p-6">
-            <h2 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-emerald-600" /> Informational Proctoring Risk Correlation
-            </h2>
-            <p className="text-xs text-slate-500 mb-4">
-              Informational context only. Risk scores represent statistical anomalies, never disciplinary proof.
-            </p>
-
-            {analytics.proctoring_risk_correlation.is_available && analytics.proctoring_risk_correlation.distribution ? (
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                {Object.entries(analytics.proctoring_risk_correlation.distribution).map(([band, val]) => (
-                  <div key={band} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div className="text-xs font-bold text-slate-700">{band}</div>
-                    <div className="text-lg font-black text-slate-900 mt-1">{val.count} students</div>
-                    <div className="text-xs text-emerald-700 font-semibold mt-0.5">Avg Score: {val.average_score}</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-                <span>
-                  {analytics.proctoring_risk_correlation.reason ||
-                    'Proctoring aggregate distribution withheld to safeguard privacy (requires cohort N ≥ 10).'}
-                </span>
-              </div>
-            )}
-          </Card>
-        </div>
+        ) : (
+          <div className="text-center p-12 bg-white rounded-xl border border-slate-200 text-slate-500 shadow-sm">
+            No analytics data available for this assessment.
+          </div>
+        )
       )}
 
       {/* Tab 3: Question Item Analysis */}
       {activeTab === 'questions' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-slate-200/90 overflow-hidden shadow-sm">
-            <table className="w-full text-left border-collapse font-mono">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  <th className="py-3.5 px-4">#</th>
-                  <th className="py-3.5 px-4">Title</th>
-                  <th className="py-3.5 px-4">Type</th>
-                  <th className="py-3.5 px-4">Max Pts</th>
-                  <th className="py-3.5 px-4">Difficulty (P)</th>
-                  <th className="py-3.5 px-4">Discrimination (D)</th>
-                  <th className="py-3.5 px-4">Avg Score</th>
-                  <th className="py-3.5 px-4">Correct / Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
-                {questions.map((q) => (
-                  <tr key={q.snapshot_question_id} className="hover:bg-slate-50/80 transition">
-                    <td className="py-3.5 px-4 font-bold text-slate-500">{q.order}</td>
-                    <td className="py-3.5 px-4 font-semibold text-slate-900 font-sans">{q.title}</td>
-                    <td className="py-3.5 px-4 text-xs font-mono text-slate-600">{q.question_type}</td>
-                    <td className="py-3.5 px-4 text-slate-800 font-semibold">{q.max_points}</td>
-                    <td className="py-3.5 px-4">
-                      <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        {q.difficulty_index_p}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      {q.discrimination_index_d !== null ? (
-                        <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                          {q.discrimination_index_d}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-400">N/A (N&lt;10)</span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 font-semibold text-slate-900">{q.average_score}</td>
-                    <td className="py-3.5 px-4 text-xs text-slate-600">
-                      {q.breakdown.correct} / {q.breakdown.total_responses}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        loading ? (
+          <div className="flex justify-center p-12 bg-white rounded-xl border border-slate-200 shadow-sm">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
           </div>
-        </div>
+        ) : questions.length === 0 ? (
+          <div className="text-center p-12 bg-white rounded-xl border border-slate-200 text-slate-500 shadow-sm">
+            No question analytics available for this assessment.
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200/90 overflow-hidden shadow-sm">
+              <table className="w-full text-left border-collapse font-mono">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    <th className="py-3.5 px-4">#</th>
+                    <th className="py-3.5 px-4">Title</th>
+                    <th className="py-3.5 px-4">Type</th>
+                    <th className="py-3.5 px-4">Max Pts</th>
+                    <th className="py-3.5 px-4">Difficulty (P)</th>
+                    <th className="py-3.5 px-4">Discrimination (D)</th>
+                    <th className="py-3.5 px-4">Avg Score</th>
+                    <th className="py-3.5 px-4">Correct / Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {questions.map((q) => (
+                    <tr key={q.snapshot_question_id} className="hover:bg-slate-50/80 transition">
+                      <td className="py-3.5 px-4 font-bold text-slate-500">{q.order}</td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-900 font-sans">{q.title}</td>
+                      <td className="py-3.5 px-4 text-xs font-mono text-slate-600">{q.question_type}</td>
+                      <td className="py-3.5 px-4 text-slate-800 font-semibold">{q.max_points}</td>
+                      <td className="py-3.5 px-4">
+                        <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {q.difficulty_index_p}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {q.discrimination_index_d !== null ? (
+                          <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                            {q.discrimination_index_d}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">N/A (N&lt;10)</span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-900">{q.average_score}</td>
+                      <td className="py-3.5 px-4 text-xs text-slate-600">
+                        {q.breakdown.correct} / {q.breakdown.total_responses}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
       )}
 
       {/* Tab 4: Reports & Export */}
@@ -624,6 +743,8 @@ export const AdminAssessmentResultsPage: React.FC = () => {
             </div>
           )}
         </Card>
+      )}
+        </>
       )}
     </div>
   );
