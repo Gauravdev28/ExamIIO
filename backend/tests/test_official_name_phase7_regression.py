@@ -349,6 +349,8 @@ class TestOfficialNamePhase7Regression:
         assert cert is not None
         assert cert.printed_name == "Official Scholar"
         assert cert.certificate_id is not None
+        assert cert.pdf_file is not None
+        assert cert.pdf_file.size > 0
 
         # Public verification endpoint check
         verify_res = api_client.get(f"/api/v1/public/certificates/verify/{cert.certificate_id}/")
@@ -366,6 +368,12 @@ class TestOfficialNamePhase7Regression:
         cert.refresh_from_db()
         assert cert.printed_name == "Official Scholar"
 
+        # Retry/regenerate PDF after profile name change: must still use original printed_name snapshot
+        CertificateService.generate_pdf(cert)
+        cert.refresh_from_db()
+        assert cert.printed_name == "Official Scholar"
+        assert cert.pdf_file.size > 0
+
         verify_res_after = api_client.get(f"/api/v1/public/certificates/verify/{cert.certificate_id}/")
         assert verify_res_after.data.get("data", {}).get("printed_name") == "Official Scholar"
 
@@ -374,10 +382,11 @@ class TestOfficialNamePhase7Regression:
     # ==========================================================================
 
     def test_06_api_contracts_contain_expected_fields_and_no_secrets(
-        self, api_client, admin_user
+        self, api_client, admin_user, proctor_user
     ):
         """
-        Verify GET /auth/me/, GET /student/profile/, and PATCH /student/profile/ contracts.
+        Verify GET /auth/me/, GET /student/profile/, and PATCH /student/profile/ contracts
+        across STUDENT, ADMIN, and PROCTOR roles.
         """
         student = User.objects.create_user(
             email="contract_student@codeguard.local",
@@ -393,9 +402,8 @@ class TestOfficialNamePhase7Regression:
             first_login_required=False
         )
 
+        # 1. Student contract
         api_client.force_authenticate(user=student)
-
-        # GET /auth/me/
         me_res = api_client.get("/api/v1/auth/me/")
         assert me_res.status_code == status.HTTP_200_OK
         me_data = me_res.data.get("data", {})
@@ -405,8 +413,9 @@ class TestOfficialNamePhase7Regression:
         }
         assert expected_me_fields.issubset(set(me_data.keys()))
         assert "password" not in me_data
+        assert me_data["student_profile"]["certificate_name"] == "Contract Tester"
+        assert me_data["official_name_required"] is False
 
-        # GET /student/profile/
         prof_res = api_client.get("/api/v1/student/profile/")
         assert prof_res.status_code == status.HTTP_200_OK
         prof_data = prof_res.data.get("data", {})
@@ -417,7 +426,6 @@ class TestOfficialNamePhase7Regression:
         assert expected_prof_fields.issubset(set(prof_data.keys()))
         assert "password" not in prof_data
 
-        # PATCH /student/profile/
         patch_res = api_client.patch("/api/v1/student/profile/", {
             "official_name": "Updated Contract Name"
         })
@@ -427,6 +435,24 @@ class TestOfficialNamePhase7Regression:
         assert patch_data["certificate_name"] == "Updated Contract Name"
         assert patch_data["official_name_required"] is False
 
+        # 2. Admin contract
+        api_client.force_authenticate(user=admin_user)
+        admin_me = api_client.get("/api/v1/auth/me/")
+        assert admin_me.status_code == status.HTTP_200_OK
+        admin_data = admin_me.data.get("data", {})
+        assert admin_data["role"] == Role.ADMIN
+        assert admin_data["official_name_required"] is False
+        assert "password" not in admin_data
+
+        # 3. Proctor contract
+        api_client.force_authenticate(user=proctor_user)
+        proctor_me = api_client.get("/api/v1/auth/me/")
+        assert proctor_me.status_code == status.HTTP_200_OK
+        proctor_data = proctor_me.data.get("data", {})
+        assert proctor_data["role"] == Role.PROCTOR
+        assert proctor_data["official_name_required"] is False
+        assert "password" not in proctor_data
+
     # ==========================================================================
     # 5. Performance & Query Count Verification (Section 14)
     # ==========================================================================
@@ -435,6 +461,8 @@ class TestOfficialNamePhase7Regression:
         """
         Verify that GET /auth/me/ and GET /student/profile/ execute within bounded query counts.
         """
+        from django.db import connection, reset_queries
+
         student = User.objects.create_user(
             email="query_student@codeguard.local",
             password="StudentPassword123!",
@@ -451,8 +479,182 @@ class TestOfficialNamePhase7Regression:
 
         api_client.force_authenticate(user=student)
 
+        reset_queries()
         res1 = api_client.get("/api/v1/auth/me/")
         assert res1.status_code == status.HTTP_200_OK
+        assert len(connection.queries) <= 2, f"auth/me exceeded query bound: {len(connection.queries)}"
 
+        reset_queries()
         res2 = api_client.get("/api/v1/student/profile/")
         assert res2.status_code == status.HTTP_200_OK
+        assert len(connection.queries) <= 2, f"student/profile exceeded query bound: {len(connection.queries)}"
+
+    # ==========================================================================
+    # 6. Complete 5-State Matrix Verification (Section 6)
+    # ==========================================================================
+
+    def test_08_five_state_machine_matrix_direct_isolation(
+        self, api_client, admin_user, published_assessment
+    ):
+        """
+        Explicitly verify all 5 distinct states against direct exam API:
+        A: first_login_required=True, certificate_name="" -> PASSWORD_CHANGE_REQUIRED
+        B: first_login_required=True, certificate_name="Valid" -> PASSWORD_CHANGE_REQUIRED
+        C: first_login_required=False, certificate_name="" -> OFFICIAL_NAME_REQUIRED
+        D: first_login_required=False, certificate_name="Valid" -> allowed
+        E: first_login_required=False, missing StudentProfile -> OFFICIAL_NAME_REQUIRED
+        """
+        # State A
+        u_a = User.objects.create_user(email="matrix_a71@test.local", password="P1", role=Role.STUDENT)
+        StudentProfile.objects.create(user=u_a, roll_number="R-A71", euid="E-A71", certificate_name="", first_login_required=True)
+        AssessmentAssignment.objects.create(assessment=published_assessment, student=u_a, assigned_by=admin_user)
+        api_client.force_authenticate(user=u_a)
+        res_a = api_client.post(f"/api/v1/student/assessments/{published_assessment.id}/start/")
+        assert res_a.status_code == status.HTTP_403_FORBIDDEN
+        assert "Initial password change is mandatory" in res_a.data.get("error", {}).get("message", "")
+
+        # State B
+        u_b = User.objects.create_user(email="matrix_b71@test.local", password="P1", role=Role.STUDENT)
+        StudentProfile.objects.create(user=u_b, roll_number="R-B71", euid="E-B71", certificate_name="Valid Name", first_login_required=True)
+        AssessmentAssignment.objects.create(assessment=published_assessment, student=u_b, assigned_by=admin_user)
+        api_client.force_authenticate(user=u_b)
+        res_b = api_client.post(f"/api/v1/student/assessments/{published_assessment.id}/start/")
+        assert res_b.status_code == status.HTTP_403_FORBIDDEN
+        assert "Initial password change is mandatory" in res_b.data.get("error", {}).get("message", "")
+
+        # State C
+        u_c = User.objects.create_user(email="matrix_c71@test.local", password="P1", role=Role.STUDENT)
+        StudentProfile.objects.create(user=u_c, roll_number="R-C71", euid="E-C71", certificate_name="", first_login_required=False)
+        AssessmentAssignment.objects.create(assessment=published_assessment, student=u_c, assigned_by=admin_user)
+        api_client.force_authenticate(user=u_c)
+        res_c = api_client.post(f"/api/v1/student/assessments/{published_assessment.id}/start/")
+        assert res_c.status_code == status.HTTP_403_FORBIDDEN
+        assert "Official full name setup is mandatory" in res_c.data.get("error", {}).get("message", "")
+
+        # State D
+        u_d = User.objects.create_user(email="matrix_d71@test.local", password="P1", role=Role.STUDENT)
+        StudentProfile.objects.create(user=u_d, roll_number="R-D71", euid="E-D71", certificate_name="Valid Name", first_login_required=False)
+        AssessmentAssignment.objects.create(assessment=published_assessment, student=u_d, assigned_by=admin_user)
+        api_client.force_authenticate(user=u_d)
+        res_d = api_client.post(f"/api/v1/student/assessments/{published_assessment.id}/start/")
+        assert res_d.status_code in (status.HTTP_200_OK, status.HTTP_201_CREATED)
+
+        # State E
+        u_e = User.objects.create_user(email="matrix_e71@test.local", password="P1", role=Role.STUDENT)
+        AssessmentAssignment.objects.create(assessment=published_assessment, student=u_e, assigned_by=admin_user)
+        api_client.force_authenticate(user=u_e)
+        res_e = api_client.post(f"/api/v1/student/assessments/{published_assessment.id}/start/")
+        assert res_e.status_code == status.HTTP_403_FORBIDDEN
+        assert "Official full name setup is mandatory" in res_e.data.get("error", {}).get("message", "")
+
+    # ==========================================================================
+    # 7. Proctor Reattempt Workflow Integration (Section 8)
+    # ==========================================================================
+
+    def test_09_proctor_reattempt_workflow_unaffected(
+        self, api_client, admin_user, proctor_user, published_assessment
+    ):
+        """
+        Verify that proctor reattempt authorization workflow operates normally
+        for a student with a configured official name.
+        """
+        student = User.objects.create_user(
+            email="reattempt_p71@codeguard.local",
+            password="StudentPassword123!",
+            role=Role.STUDENT,
+            display_name="Reattempt Candidate"
+        )
+        StudentProfile.objects.create(
+            user=student,
+            roll_number="ROLL-P71-REAT",
+            euid="CG-P71-REAT",
+            certificate_name="Reattempt Candidate",
+            first_login_required=False
+        )
+        AssessmentAssignment.objects.create(
+            assessment=published_assessment,
+            student=student,
+            assigned_by=admin_user,
+            status=AssignmentStatus.ASSIGNED,
+        )
+
+        from apps.invigilation.models import ProctorAssignment
+
+        # Assign proctor to assessment
+        ProctorAssignment.objects.create(
+            proctor=proctor_user,
+            assessment=published_assessment,
+            is_active=True
+        )
+
+        # Student starts attempt 1
+        api_client.force_authenticate(user=student)
+        res_start = api_client.post(f"/api/v1/student/assessments/{published_assessment.id}/start/")
+        assert res_start.status_code in (status.HTTP_200_OK, status.HTTP_201_CREATED)
+        attempt_id = res_start.data["data"]["attempt_id"]
+
+        # Simulate proctor or system cancelling attempt due to technical glitch
+        attempt = TestAttempt.objects.get(id=attempt_id)
+        attempt.status = AttemptStatus.CANCELLED
+        attempt.save(update_fields=['status'])
+
+        # Proctor grants reattempt authorization
+        api_client.force_authenticate(user=proctor_user)
+        reauth_res = api_client.post(f"/api/v1/proctor/attempts/{attempt_id}/reattempt/", {
+            "reason": "TECHNICAL_PROBLEM",
+            "note": "Technical network glitch during exam",
+            "grant_extra_attempt": True
+        })
+        assert reauth_res.status_code == status.HTTP_201_CREATED
+
+        # Make reattempt immediately available for testing
+        from apps.invigilation.models import ProctorReattemptAuthorization
+        ProctorReattemptAuthorization.objects.filter(original_attempt_id=attempt_id).update(
+            available_at=timezone.now() - timedelta(seconds=1)
+        )
+
+        # Student can start attempt 2
+        api_client.force_authenticate(user=student)
+        res_start2 = api_client.post(f"/api/v1/student/assessments/{published_assessment.id}/start/")
+        assert res_start2.status_code in (status.HTTP_200_OK, status.HTTP_201_CREATED)
+
+    # ==========================================================================
+    # 8. Assessment List Query Efficiency (Section 14)
+    # ==========================================================================
+
+    def test_10_assessment_list_query_efficiency(
+        self, api_client, admin_user, published_assessment
+    ):
+        """
+        Verify that student assessment listing does not produce query explosions
+        when multiple assessments exist.
+        """
+        from django.db import connection, reset_queries
+
+        student = User.objects.create_user(
+            email="list_query_p71@codeguard.local",
+            password="StudentPassword123!",
+            role=Role.STUDENT,
+            display_name="List Query Student"
+        )
+        StudentProfile.objects.create(
+            user=student,
+            roll_number="ROLL-P71-LIST",
+            euid="CG-P71-LIST",
+            certificate_name="List Query Student",
+            first_login_required=False
+        )
+        AssessmentAssignment.objects.create(
+            assessment=published_assessment,
+            student=student,
+            assigned_by=admin_user,
+            status=AssignmentStatus.ASSIGNED,
+        )
+
+        api_client.force_authenticate(user=student)
+
+        reset_queries()
+        res = api_client.get("/api/v1/student/assessments/")
+        assert res.status_code == status.HTTP_200_OK
+        # Query count should remain bounded (<= 10 queries)
+        assert len(connection.queries) <= 10, f"Query count exceeded: {len(connection.queries)}"
