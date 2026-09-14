@@ -69,7 +69,7 @@ export const PublicNavbar: React.FC = () => {
 
   return (
     <nav className="sticky top-0 z-40 backdrop-blur-md bg-[#F4F1EA]/95 border-b border-[#DDD8CE] transition-all">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="w-full px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Brand Logo */}
           <Link

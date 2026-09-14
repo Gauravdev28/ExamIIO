@@ -334,7 +334,7 @@ export const QuestionEditorPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-16 flex flex-col items-center justify-center space-y-3">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-16 flex flex-col items-center justify-center space-y-3">
         <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
         <p className="text-xs text-slate-500 font-mono">Loading question configuration...</p>
       </div>
@@ -342,8 +342,8 @@ export const QuestionEditorPage: React.FC = () => {
   }
 
   return (
-    <div className="py-8">
-      <div className="max-w-5xl mx-auto px-4">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
+      <div className="w-full">
         {/* Page Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>

@@ -398,7 +398,7 @@ export const AssessmentEditorPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-16 flex flex-col items-center justify-center space-y-3">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-16 flex flex-col items-center justify-center space-y-3">
         <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
         <p className="text-xs text-slate-400 font-mono">Loading assessment configuration...</p>
       </div>
@@ -406,7 +406,7 @@ export const AssessmentEditorPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 space-y-6 max-w-5xl">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Top Navigation */}
       <div className="flex items-center justify-between border-b border-slate-200 pb-4">
         <Link

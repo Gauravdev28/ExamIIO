@@ -16,8 +16,8 @@ export const PublicFooter: React.FC = () => {
   };
 
   return (
-    <footer className="border-t border-[#DDD8CE] bg-[#E8E4DC] text-[#5E6B7D] text-xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <footer className="border-t border-[#DDD8CE] bg-[#E8E4DC] text-[#5E6B7D] text-xs w-full">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-10 lg:gap-12 mb-12">
           {/* Brand Column (2 cols wide on desktop) */}
           <div className="space-y-4 md:col-span-2">

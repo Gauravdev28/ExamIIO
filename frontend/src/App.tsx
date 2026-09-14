@@ -64,17 +64,17 @@ const AuthenticatedAppLayout: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F4F1EA] text-[#243247] selection:bg-[#2878D8]/20 selection:text-[#243247]">
+    <div className="min-h-screen flex flex-col bg-[#F4F1EA] text-[#243247] selection:bg-[#2878D8]/20 selection:text-[#243247] w-full">
       <Navbar />
       <SessionTimeoutManager />
       <ForcePasswordChangeModal />
       <OfficialNameSetupModal />
-      <main className="flex-1">
+      <main className="flex-1 w-full min-w-0">
         <ErrorBoundary fallbackTitle="Page Load Error">
           <Outlet />
         </ErrorBoundary>
       </main>
-      <footer className="border-t border-[#DDD8CE] bg-[#E8E4DC] py-6 text-center text-xs text-[#5E6B7D] font-medium">
+      <footer className="border-t border-[#DDD8CE] bg-[#E8E4DC] py-6 text-center text-xs text-[#5E6B7D] font-medium w-full">
         ExamIIO &copy; {new Date().getFullYear()}
       </footer>
     </div>

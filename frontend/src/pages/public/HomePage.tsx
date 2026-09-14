@@ -72,7 +72,7 @@ export const HomePage: React.FC = () => {
           backgroundSize: '24px 24px',
         }}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="max-w-4xl mx-auto text-center space-y-6">
             {/* Eyebrow badge */}
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#FAF9F6] text-[#243247] border border-[#DDD8CE] text-xs font-mono font-medium shadow-xs">
@@ -251,7 +251,7 @@ export const HomePage: React.FC = () => {
 
         {/* Capability / Trust Strip */}
         <div className="border-t border-[#DDD8CE] bg-[#EDE9E1] py-5 mt-16">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="w-full px-4 sm:px-6 lg:px-8">
             <div className="flex flex-wrap items-center justify-around gap-6 md:gap-8 text-xs font-mono font-bold text-[#243247] tracking-wider">
               <span className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-[#2878D8]" />
@@ -283,7 +283,7 @@ export const HomePage: React.FC = () => {
       </section>
 
       {/* Core Platform Capabilities */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+      <section className="w-full px-4 sm:px-6 lg:px-8 space-y-12">
         <div className="max-w-2xl mx-auto text-center space-y-3">
           <div className="text-xs font-mono font-bold text-[#2878D8] uppercase tracking-wider">
             Capabilities
@@ -366,7 +366,7 @@ export const HomePage: React.FC = () => {
       </section>
 
       {/* Interactive Product Showcase (Presentation-Only) */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+      <section className="w-full px-4 sm:px-6 lg:px-8 space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#DDD8CE] pb-5">
           <div>
             <div className="text-xs font-mono font-bold text-[#2878D8] uppercase tracking-wider">
@@ -581,7 +581,7 @@ export const HomePage: React.FC = () => {
       {/* =========================================================================
           2. SOLUTIONS: TARGET ORGANIZATIONS
           ========================================================================= */}
-      <section id="solutions" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10 scroll-mt-24">
+      <section id="solutions" className="w-full px-4 sm:px-6 lg:px-8 space-y-10 scroll-mt-24">
         <div className="max-w-2xl mx-auto text-center space-y-3">
           <div className="text-xs font-mono font-bold text-[#2878D8] uppercase tracking-wider">
             Target Organizations
@@ -632,7 +632,7 @@ export const HomePage: React.FC = () => {
       {/* =========================================================================
           3. HOW IT WORKS: PROBLEM & THE ExamIIO OPERATIONAL MODEL
           ========================================================================= */}
-      <section id="how-it-works" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16 scroll-mt-24">
+      <section id="how-it-works" className="w-full px-4 sm:px-6 lg:px-8 space-y-16 scroll-mt-24">
         {/* The Problem & Unified Platform */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           <div className="lg:col-span-5 space-y-4">
@@ -734,7 +734,7 @@ export const HomePage: React.FC = () => {
       {/* =========================================================================
           4. TECHNOLOGY: ARCHITECTURE & PROCESSING PIPELINE
           ========================================================================= */}
-      <section id="technology" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12 scroll-mt-24">
+      <section id="technology" className="w-full px-4 sm:px-6 lg:px-8 space-y-12 scroll-mt-24">
         <div className="max-w-2xl mx-auto text-center space-y-3">
           <div className="text-xs font-mono font-bold text-[#2878D8] uppercase tracking-wider">
             Architecture
@@ -841,7 +841,7 @@ export const HomePage: React.FC = () => {
       {/* =========================================================================
           5. SECURITY & INTEGRITY
           ========================================================================= */}
-      <section id="security" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 scroll-mt-24">
+      <section id="security" className="w-full px-4 sm:px-6 lg:px-8 space-y-8 scroll-mt-24">
         <div className="max-w-2xl mx-auto text-center space-y-3">
           <div className="text-xs font-mono font-bold text-[#2878D8] uppercase tracking-wider">
             Integrity Controls
@@ -880,7 +880,7 @@ export const HomePage: React.FC = () => {
       {/* =========================================================================
           6. ABOUT ExamIIO & FOUNDER PROFILE
           ========================================================================= */}
-      <section id="about" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 scroll-mt-24">
+      <section id="about" className="w-full px-4 sm:px-6 lg:px-8 space-y-8 scroll-mt-24">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
           {/* About Narrative (7 cols) */}
           <div className="lg:col-span-7 space-y-4">
@@ -938,7 +938,7 @@ export const HomePage: React.FC = () => {
       {/* =========================================================================
           7. DEDICATED CONTACT SECTION (REPLACES OLD CONFIDENCE CTA)
           ========================================================================= */}
-      <section id="contact" className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 scroll-mt-24">
+      <section id="contact" className="w-full px-4 sm:px-6 lg:px-8 scroll-mt-24">
         <div className="rounded-3xl bg-[#FAF9F6] border border-[#DDD8CE] p-8 sm:p-12 shadow-xs text-center space-y-6">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#EDE9E1] text-[#243247] border border-[#DDD8CE] text-xs font-mono font-semibold">
             <Mail className="w-3.5 h-3.5 text-[#2878D8]" />

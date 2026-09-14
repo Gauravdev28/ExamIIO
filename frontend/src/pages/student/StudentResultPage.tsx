@@ -136,7 +136,7 @@ export const StudentResultPage: React.FC = () => {
   const isPassed = result.is_passed;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
       {/* Back Button */}
       <button
         onClick={() => navigate('/student/assessments')}

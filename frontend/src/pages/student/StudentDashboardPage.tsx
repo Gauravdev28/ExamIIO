@@ -142,7 +142,7 @@ export const StudentDashboardPage: React.FC = () => {
   const candidateDisplayName = user?.display_name || user?.first_name || (user?.email ? user.email.split('@')[0] : 'Candidate');
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* ============================================================
           1. HEADER & BRAND IDENTITY
           ============================================================ */}

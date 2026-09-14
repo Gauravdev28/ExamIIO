@@ -201,7 +201,7 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] bg-[#F4F1EA] text-[#243247] selection:bg-[#2878D8]/20 selection:text-[#243247]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* ============================================================
           1. HEADER & BRAND IDENTITY
           ============================================================ */}

@@ -544,7 +544,7 @@ export const ProctorLiveConsolePage: React.FC = () => {
         {/* Center: Selected Candidate & Live Keyframe */}
         <div className="flex-1 flex flex-col bg-slate-950 p-6 overflow-y-auto">
           {selectedCandidate ? (
-            <div className="flex flex-col gap-6 max-w-4xl mx-auto w-full">
+            <div className="flex flex-col gap-6 w-full">
               {/* Header Info */}
               <div className="flex items-center justify-between bg-slate-900/60 p-4 rounded-xl border border-slate-800/80">
                 <div>
