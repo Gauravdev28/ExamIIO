@@ -297,6 +297,7 @@ export const AdminAssessmentResultsPage: React.FC = () => {
                     <th className="py-3.5 px-4">Verdict</th>
                     <th className="py-3.5 px-4">Proctoring Risk</th>
                     <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
@@ -304,6 +305,7 @@ export const AdminAssessmentResultsPage: React.FC = () => {
                     const isNotStarted = r.status === 'NOT_STARTED';
                     const isPass = r.is_passed;
                     const proct = r.proctoring_summary;
+                    const canReview = !['NOT_STARTED', 'IN_PROGRESS', 'SUBMITTED', 'EVALUATING'].includes(r.status) && Boolean(r.id);
 
                     return (
                       <tr key={r.id} className="hover:bg-slate-50/80 transition">
@@ -352,10 +354,10 @@ export const AdminAssessmentResultsPage: React.FC = () => {
                             <span
                               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${
                                 proct.risk_band === 'CRITICAL' || proct.risk_band === 'HIGH'
-                                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                  : proct.risk_band === 'MEDIUM'
-                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  : 'bg-slate-100 text-slate-700 border border-slate-200'
+                                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                    : proct.risk_band === 'MEDIUM'
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
                               }`}
                             >
                               <ShieldAlert className="w-3 h-3" /> {proct.risk_band} ({proct.risk_score})
@@ -366,6 +368,18 @@ export const AdminAssessmentResultsPage: React.FC = () => {
                         </td>
                         <td className="py-3.5 px-4">
                           {renderStatusBadge(r.status)}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          {canReview ? (
+                            <button
+                              onClick={() => navigate(`/admin/assessments/${assessmentId}/results/${r.id}`)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold transition"
+                            >
+                              Review
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400 font-medium">Not available</span>
+                          )}
                         </td>
                       </tr>
                     );

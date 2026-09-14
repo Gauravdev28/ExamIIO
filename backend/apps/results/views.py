@@ -42,6 +42,7 @@ from .serializers import (
     AssessmentResultStudentDetailSerializer,
     AssessmentResultAdminListSerializer,
     AssessmentResultAdminDetailSerializer,
+    AdminAssessmentResultAnswerReviewSerializer,
     HistoricalResultSummarySerializer,
     CreateReportJobSerializer,
     ReportJobDetailSerializer,
@@ -495,6 +496,70 @@ class AdminAssessmentResultDetailView(APIView):
         )
         serializer = AssessmentResultAdminDetailSerializer(result)
         return APIResponse(data=serializer.data, message="Result details retrieved.")
+
+
+class AdminAssessmentCandidateResultDetailView(APIView):
+    """
+    Retrieve authoritative question-by-question candidate answer review.
+    GET /api/v1/admin/assessments/<assessment_id>/results/<result_id>/
+    """
+    permission_classes = [IsAuthenticated, IsActiveUser, IsAdmin]
+
+    def get(self, request, assessment_id, result_id):
+        assessment = get_object_or_404(Assessment, id=assessment_id)
+        result = get_object_or_404(
+            AssessmentResult.objects.select_related(
+                'assessment',
+                'student',
+                'student__student_profile',
+                'attempt',
+                'assessment_snapshot',
+                'attempt__proctoring_session'
+            ).prefetch_related(
+                'question_results',
+                'question_results__snapshot_question'
+            ),
+            id=result_id,
+            assessment=assessment
+        )
+
+        if not result.attempt or str(result.attempt.assessment_id) != str(assessment.id):
+            raise Http404("Assessment result attempt not found for this assessment.")
+
+        from apps.assessments.models import AttemptAnswer
+        from apps.evaluator.models import CodeSubmission, SubmissionType
+
+        answers_list = list(
+            AttemptAnswer.objects.filter(attempt=result.attempt)
+            .select_related('snapshot_question')
+        )
+        answers_by_qid = {}
+        for ans in answers_list:
+            answers_by_qid[ans.question_id] = ans
+            if ans.snapshot_question:
+                answers_by_qid[ans.snapshot_question.snapshot_question_id] = ans
+            answers_by_qid[str(ans.snapshot_question_id)] = ans
+
+        submissions_list = list(
+            CodeSubmission.objects.filter(
+                attempt=result.attempt,
+                submission_type=SubmissionType.SUBMIT
+            ).select_related('snapshot_question').prefetch_related('test_case_results').order_by('created_at')
+        )
+        submissions_by_qid = {}
+        for sub in submissions_list:
+            if sub.snapshot_question:
+                submissions_by_qid[sub.snapshot_question.snapshot_question_id] = sub
+            submissions_by_qid[str(sub.snapshot_question_id)] = sub
+
+        serializer = AdminAssessmentResultAnswerReviewSerializer(
+            result,
+            context={
+                'answers_by_qid': answers_by_qid,
+                'submissions_by_qid': submissions_by_qid
+            }
+        )
+        return APIResponse(data=serializer.data, message="Candidate answer review retrieved successfully.")
 
 
 class AdminAssessmentAnalyticsView(APIView):

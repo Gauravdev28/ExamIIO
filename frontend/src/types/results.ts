@@ -173,3 +173,117 @@ export interface PublicCertificateVerification {
   is_valid: boolean;
 }
 
+export interface AdminCandidateReviewOption {
+  id: string;
+  text: string;
+  is_correct: boolean;
+  is_selected: boolean;
+}
+
+export interface AdminCandidateTestCaseResult {
+  index: number;
+  is_hidden: boolean;
+  verdict: string;
+  points_awarded: string;
+  max_points: string;
+  execution_time_ms: number;
+  memory_used_kb: number;
+  public_input?: string | null;
+  expected_output?: string | null;
+  actual_output?: string | null;
+  error_message?: string | null;
+}
+
+export interface AdminCandidateCodeSubmission {
+  source_code: string;
+  language: string;
+  verdict: string | null;
+  passed_test_cases: number;
+  total_test_cases: number;
+  execution_time_ms: number;
+  memory_used_kb: number;
+  compilation_error: string;
+  test_cases: AdminCandidateTestCaseResult[];
+}
+
+export interface AdminQuestionReviewItem {
+  snapshot_question_id: string;
+  question_id: string;
+  order: number;
+  title: string;
+  description: string;
+  instructions: string;
+  question_type: string;
+  difficulty: string;
+  points: number;
+  earned_points: string;
+  max_points: string;
+  is_correct: boolean;
+  is_partially_correct: boolean;
+  is_skipped: boolean;
+  negative_marking_enabled: boolean;
+  negative_points: number;
+  tags: string[];
+  student_answer: {
+    selected_options: string[];
+    text_response: string;
+    code_response: string;
+    code_language: string;
+    sql_response: string;
+    is_answered: boolean;
+  };
+  correct_answer: {
+    options?: AdminCandidateReviewOption[];
+    correct_options?: string[];
+    exact_matches?: string[];
+    case_sensitive?: boolean;
+    test_cases?: Array<{
+      index: number;
+      is_hidden: boolean;
+      points: number;
+      input_data?: string;
+      expected_output?: string;
+    }>;
+    schema_setup_sql?: string;
+    expected_result_definition?: string;
+    allowed_dialect?: string;
+  };
+  evaluation_details: Record<string, any>;
+  time_spent_seconds: number;
+  code_submission?: AdminCandidateCodeSubmission | null;
+}
+
+export interface AdminCandidateResultDetail {
+  id: string;
+  attempt_id: string;
+  assessment_id: string;
+  assessment_title: string;
+  student: {
+    id: string;
+    email: string;
+    official_name: string;
+    roll_number: string;
+    euid: string;
+  };
+  status: string;
+  total_score_earned: string;
+  total_possible_score: string;
+  percentage: string;
+  is_passed: boolean | null;
+  total_questions: number;
+  answered_questions: number;
+  correct_questions: number;
+  partially_correct_questions: number;
+  incorrect_questions: number;
+  skipped_questions: number;
+  time_spent_seconds: number;
+  finalized_at: string | null;
+  proctoring_summary?: {
+    risk_score: string;
+    risk_band: string;
+    review_status?: string;
+    status: string;
+  } | null;
+  questions: AdminQuestionReviewItem[];
+}
+

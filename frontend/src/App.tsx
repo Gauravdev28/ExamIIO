@@ -18,6 +18,7 @@ import { AdminAssessmentsPage } from './pages/admin/AdminAssessmentsPage';
 import { AssessmentEditorPage } from './pages/admin/AssessmentEditorPage';
 import { AdminProctoringDashboardPage } from './pages/admin/AdminProctoringDashboardPage';
 import { AdminAssessmentResultsPage } from './pages/admin/AdminAssessmentResultsPage';
+import { AdminCandidateResultDetailPage } from './pages/admin/AdminCandidateResultDetailPage';
 import { AdminAssessmentAttendancePage } from './pages/admin/AdminAssessmentAttendancePage';
 import { AdminRetentionDashboardPage } from './pages/admin/AdminRetentionDashboardPage';
 import { AdminManagementPage } from './pages/admin/AdminManagementPage';
@@ -157,6 +158,14 @@ export const App: React.FC = () => {
               element={
                 <AdminRoute>
                   <AdminAssessmentResultsPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/assessments/:assessmentId/results/:resultId"
+              element={
+                <AdminRoute>
+                  <AdminCandidateResultDetailPage />
                 </AdminRoute>
               }
             />

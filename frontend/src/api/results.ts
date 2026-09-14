@@ -7,6 +7,7 @@ import {
   ReportJob,
   Certificate,
   PublicCertificateVerification,
+  AdminCandidateResultDetail,
 } from '../types/results';
 
 export interface PaginatedResponse<T> {
@@ -97,6 +98,14 @@ export const ResultsAPI = {
 
   getAdminResultDetail: async (resultId: string): Promise<AssessmentResult> => {
     const response = await api.get(`/admin/results/${resultId}/`);
+    return response.data.data;
+  },
+
+  getAdminAssessmentResultDetail: async (
+    assessmentId: string,
+    resultId: string
+  ): Promise<AdminCandidateResultDetail> => {
+    const response = await api.get(`/admin/assessments/${assessmentId}/results/${resultId}/`);
     return response.data.data;
   },
 

@@ -9,6 +9,7 @@ from .views import (
     StudentReportDownloadView,
     AdminAssessmentResultListView,
     AdminAssessmentResultDetailView,
+    AdminAssessmentCandidateResultDetailView,
     AdminAssessmentAnalyticsView,
     AdminQuestionAnalyticsView,
     AdminReleaseResultsView,
@@ -48,6 +49,7 @@ urlpatterns = [
 
     # Admin Result & Analytics Endpoints
     path('admin/assessments/<uuid:assessment_id>/results/', AdminAssessmentResultListView.as_view(), name='admin-assessment-results'),
+    path('admin/assessments/<uuid:assessment_id>/results/<uuid:result_id>/', AdminAssessmentCandidateResultDetailView.as_view(), name='admin-assessment-candidate-result-detail'),
     path('admin/assessments/<uuid:assessment_id>/analytics/', AdminAssessmentAnalyticsView.as_view(), name='admin-assessment-analytics'),
     path('admin/assessments/<uuid:assessment_id>/analytics/questions/', AdminQuestionAnalyticsView.as_view(), name='admin-question-analytics'),
     path('admin/assessments/<uuid:assessment_id>/release-results/', AdminReleaseResultsView.as_view(), name='admin-release-results'),
