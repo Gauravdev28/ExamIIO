@@ -2,16 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --canvas-bg: #FAF8F2;
+  --canvas-subtle: #F4F1EA;
+  --surface-card: #FFFDF8;
+  --surface-tinted: #F0F6FF;
+  --text-navy: #102A56;
+  --text-muted: #64748B;
+  --border-warm: #E5E0D8;
+  --border-subtle: #EDE8DF;
+  --brand-blue: #2563EB;
+  --brand-blue-dark: #1D4ED8;
+}
+
 @layer base {
   body {
-    @apply bg-[#F4F1EA] text-[#243247] font-sans antialiased;
+    @apply bg-canvas text-navy-900 font-sans antialiased selection:bg-brand-100 selection:text-brand-900 min-h-screen;
+    background-color: #FAF8F2;
+    color: #102A56;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply text-slate-900 font-semibold tracking-tight;
+    @apply font-display text-navy-950 font-bold tracking-tight;
   }
 
-  /* Default form input contrast */
+  /* Form input contrast & warm styling */
   input[type="text"],
   input[type="email"],
   input[type="password"],
@@ -20,7 +35,7 @@
   input[type="date"],
   select,
   textarea {
-    @apply text-slate-900 bg-white border-slate-300;
+    @apply text-navy-900 bg-white border-borderWarm rounded-xl focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none transition-all;
   }
 
   /* Universal high-contrast read-only and disabled input rules */
@@ -29,62 +44,90 @@
   select:disabled,
   input[readonly],
   textarea[readonly] {
-    color: #0f172a !important;
-    -webkit-text-fill-color: #0f172a !important;
-    background-color: #f8fafc !important;
-    opacity: 1 !important;
-    border-color: #cbd5e1 !important;
+    color: #102A56 !important;
+    -webkit-text-fill-color: #102A56 !important;
+    background-color: #F4F1EA !important;
+    opacity: 0.9 !important;
+    border-color: #DCD6CB !important;
   }
 
   /* Universal high-contrast placeholders */
   ::placeholder,
   ::-webkit-input-placeholder {
-    color: #64748b !important;
-    opacity: 1 !important;
+    color: #64748B !important;
+    opacity: 0.9 !important;
   }
 
-  /* Standard label contrast */
+  /* Standard label styling */
   label {
-    @apply text-slate-700 font-medium;
+    @apply text-navy-700 text-xs font-semibold uppercase tracking-wider mb-1 block;
   }
 }
 
 @layer components {
-  /* Light theme card and surface utilities */
-  .glass-panel {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(12px);
-    border: 1px solid #e2e8f0;
+  /* Warm card surface */
+  .warm-card {
+    @apply bg-canvas-card border border-borderWarm rounded-2xl shadow-warm-xs;
   }
 
-  /* Standard Table on Light Surface */
+  .warm-card-interactive {
+    @apply bg-canvas-card border border-borderWarm rounded-2xl shadow-warm-xs hover:shadow-warm-md hover:border-borderWarm-strong hover:-translate-y-0.5 transition-all duration-200;
+  }
+
+  /* Glass/Backdrop blur on warm surface */
+  .warm-glass {
+    background: rgba(255, 253, 248, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(229, 224, 216, 0.85);
+  }
+
+  /* Standard Table on Warm Light Surface */
   .admin-table-container {
-    @apply bg-white border border-slate-200/90 rounded-xl overflow-hidden shadow-sm;
+    @apply bg-canvas-card border border-borderWarm rounded-2xl overflow-hidden shadow-warm-xs;
   }
 
   .admin-table-head {
-    @apply bg-slate-50 text-slate-600 border-b border-slate-200 text-xs font-semibold uppercase tracking-wider;
+    @apply bg-canvas-subtle text-navy-600 border-b border-borderWarm text-xs font-semibold uppercase tracking-wider;
   }
 
   .admin-table-row {
-    @apply hover:bg-slate-50/80 transition-colors border-b border-slate-100 last:border-0 text-slate-700;
+    @apply hover:bg-canvas-subtle/70 transition-colors border-b border-borderWarm-subtle last:border-0 text-navy-800;
+  }
+
+  /* Focus ring utility */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-canvas;
   }
 }
 
+/* Subtle Warm Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #F4F1EA;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #DCD6CB;
   border-radius: 9999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #B8B0A2;
+}
+
+/* Accessibility: Respect Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

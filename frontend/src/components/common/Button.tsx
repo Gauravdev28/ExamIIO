@@ -3,9 +3,11 @@ import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'outline' | 'danger' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'outline' | 'danger' | 'ghost' | 'success' | 'subtle';
   size?: 'sm' | 'md' | 'lg';
   isLoading?: boolean;
+  leftIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -13,24 +15,28 @@ export const Button: React.FC<ButtonProps> = ({
   variant = 'primary',
   size = 'md',
   isLoading = false,
+  leftIcon,
+  rightIcon,
   className,
   disabled,
   ...props
 }) => {
-  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white disabled:opacity-50 disabled:cursor-not-allowed select-none';
+  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-xl transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-canvas disabled:opacity-50 disabled:cursor-not-allowed select-none active:scale-[0.98]';
 
   const variants = {
-    primary: 'bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm focus:ring-emerald-500 active:bg-emerald-800',
-    secondary: 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-sm focus:ring-slate-400 active:bg-slate-100',
-    outline: 'border border-slate-300 hover:border-emerald-600 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 focus:ring-emerald-500',
-    danger: 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm focus:ring-rose-500 active:bg-rose-800',
-    ghost: 'hover:bg-slate-100 text-slate-600 hover:text-slate-900 focus:ring-slate-400',
+    primary: 'bg-brand-600 hover:bg-brand-700 text-white font-semibold shadow-warm-xs hover:shadow-warm-sm focus:ring-brand-500 active:bg-brand-800',
+    secondary: 'bg-canvas-card hover:bg-canvas-subtle text-navy-800 border border-borderWarm shadow-warm-xs hover:border-borderWarm-strong focus:ring-brand-400 active:bg-canvas-subtle',
+    outline: 'border border-borderWarm-strong hover:border-brand-600 hover:bg-brand-50 text-navy-800 hover:text-brand-700 focus:ring-brand-500',
+    danger: 'bg-accent-coral hover:bg-rose-700 text-white shadow-warm-xs focus:ring-rose-500 active:bg-rose-800 font-semibold',
+    ghost: 'hover:bg-canvas-subtle text-navy-700 hover:text-navy-950 focus:ring-navy-300',
+    success: 'bg-accent-emerald hover:bg-emerald-700 text-white shadow-warm-xs focus:ring-emerald-500 active:bg-emerald-800 font-semibold',
+    subtle: 'bg-brand-50 hover:bg-brand-100 text-brand-700 font-semibold border border-brand-200/60 focus:ring-brand-400',
   };
 
   const sizes = {
     sm: 'text-xs px-3 py-1.5 gap-1.5',
     md: 'text-sm px-4 py-2 gap-2',
-    lg: 'text-base px-6 py-2.5 gap-2.5',
+    lg: 'text-base px-5 py-2.5 gap-2.5',
   };
 
   return (
@@ -48,8 +54,13 @@ export const Button: React.FC<ButtonProps> = ({
           Loading...
         </>
       ) : (
-        children
+        <>
+          {leftIcon && <span className="shrink-0">{leftIcon}</span>}
+          {children}
+          {rightIcon && <span className="shrink-0">{rightIcon}</span>}
+        </>
       )}
     </button>
   );
 };
+

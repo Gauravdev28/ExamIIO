@@ -1,7 +1,6 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
-import { Navbar } from './components/layout/Navbar';
 import { PublicLayout } from './components/layout/PublicLayout';
 import { HomePage } from './pages/public/HomePage';
 import { AboutPage } from './pages/public/AboutPage';
@@ -40,10 +39,8 @@ import {
   StudentRoute, 
   AuthenticatedRoute 
 } from './components/common/ProtectedRoute';
-import { ForcePasswordChangeModal } from './components/auth/ForcePasswordChangeModal';
-import { OfficialNameSetupModal } from './components/auth/OfficialNameSetupModal';
-import { SessionTimeoutManager } from './components/auth/SessionTimeoutManager';
-import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { DashboardLayout } from './components/layout/DashboardLayout';
+import { ExamRoomLayout } from './components/layout/ExamRoomLayout';
 
 // Authenticated Application Shell layout
 const AuthenticatedAppLayout: React.FC = () => {
@@ -51,34 +48,10 @@ const AuthenticatedAppLayout: React.FC = () => {
   const isExamRoom = location.pathname.startsWith('/student/room/');
 
   if (isExamRoom) {
-    return (
-      <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-900">
-        <SessionTimeoutManager />
-        <ForcePasswordChangeModal />
-        <OfficialNameSetupModal />
-        <ErrorBoundary fallbackTitle="Exam Room Error">
-          <Outlet />
-        </ErrorBoundary>
-      </div>
-    );
+    return <ExamRoomLayout />;
   }
 
-  return (
-    <div className="min-h-screen flex flex-col bg-[#F4F1EA] text-[#243247] selection:bg-[#2878D8]/20 selection:text-[#243247] w-full">
-      <Navbar />
-      <SessionTimeoutManager />
-      <ForcePasswordChangeModal />
-      <OfficialNameSetupModal />
-      <main className="flex-1 w-full min-w-0">
-        <ErrorBoundary fallbackTitle="Page Load Error">
-          <Outlet />
-        </ErrorBoundary>
-      </main>
-      <footer className="border-t border-[#DDD8CE] bg-[#E8E4DC] py-6 text-center text-xs text-[#5E6B7D] font-medium w-full">
-        ExamIIO &copy; {new Date().getFullYear()}
-      </footer>
-    </div>
-  );
+  return <DashboardLayout />;
 };
 
 export const App: React.FC = () => {

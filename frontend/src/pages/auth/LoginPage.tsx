@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Eye, EyeOff, AlertCircle, Clock } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, Clock, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { Button } from '../../components/common/Button';
+import { Card } from '../../components/common/Card';
 import { ExamIIOLogo } from '../../components/common/ExamIIOLogo';
 
 export const LoginPage: React.FC = () => {
@@ -71,7 +72,7 @@ export const LoginPage: React.FC = () => {
         navigate('/student', { replace: true });
       }
     } catch (err: any) {
-      // Safe, informative error categorization matching Part 10 specifications
+      // Safe, informative error categorization
       const statusCode = err.status_code || err.response?.status;
       const errorCode = err.error?.code || '';
       const errorMessage = (err.error?.message || '').toLowerCase();
@@ -115,19 +116,19 @@ export const LoginPage: React.FC = () => {
           <div className="flex justify-center">
             <ExamIIOLogo size="lg" />
           </div>
-          <p className="text-sm text-slate-600 font-medium">
-            Sign in to your institutional account
+          <p className="text-xs sm:text-sm text-navy-600 font-medium">
+            Sign in to your institutional examination account
           </p>
         </div>
 
         {/* Login Card */}
-        <div className="p-8 space-y-6 bg-[#FAF9F6] border border-[#DDD8CE] shadow-sm rounded-2xl">
+        <Card variant="warm" className="p-8 space-y-6">
           {isInactiveLogout && (
             <div
               role="alert"
-              className="p-3.5 rounded-lg bg-[#EAF2FC] border border-[#D9DDE3] text-[#243247] text-xs flex items-center gap-2.5 font-medium"
+              className="p-3.5 rounded-xl bg-brand-50 border border-brand-200 text-brand-900 text-xs flex items-center gap-2.5 font-medium"
             >
-              <Clock className="w-4 h-4 text-[#2878D8] shrink-0" />
+              <Clock className="w-4 h-4 text-brand-600 shrink-0" />
               <span>Session expired due to inactivity. Please sign in again.</span>
             </div>
           )}
@@ -135,9 +136,9 @@ export const LoginPage: React.FC = () => {
           {formError && (
             <div
               role="alert"
-              className="p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2.5"
+              className="p-3.5 rounded-xl bg-coral-50 border border-coral-200 text-coral-800 text-xs flex items-start gap-2.5 shadow-warm-xs"
             >
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <AlertCircle className="w-4 h-4 text-coral-600 shrink-0 mt-0.5" />
               <span className="leading-relaxed font-medium">{formError}</span>
             </div>
           )}
@@ -147,7 +148,7 @@ export const LoginPage: React.FC = () => {
             <div className="space-y-1.5">
               <label
                 htmlFor="identifier"
-                className="block text-xs font-semibold text-[#243247]"
+                className="block text-xs font-bold text-navy-900"
               >
                 Email address or EUID
               </label>
@@ -166,18 +167,18 @@ export const LoginPage: React.FC = () => {
                 placeholder="name@institution.edu or EUID"
                 aria-invalid={!!fieldErrors.identifier}
                 aria-describedby={fieldErrors.identifier ? 'identifier-error' : 'identifier-hint'}
-                className={`block w-full px-3.5 py-2.5 text-sm bg-white border rounded-lg text-[#243247] placeholder:text-[#5E6B7D] focus:outline-none focus:ring-2 transition-colors ${
+                className={`block w-full px-3.5 py-2.5 text-sm bg-surface border rounded-xl text-navy-900 placeholder:text-navy-400 focus:outline-hidden focus:ring-2 transition-all ${
                   fieldErrors.identifier
-                    ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500/20'
-                    : 'border-[#D9DDE3] focus:border-[#2878D8] focus:ring-[#2878D8]/20'
+                    ? 'border-coral-300 focus:border-coral-500 focus:ring-coral-500/20'
+                    : 'border-warm-200 focus:border-brand-500 focus:ring-brand-500/20'
                 }`}
               />
               {fieldErrors.identifier ? (
-                <p id="identifier-error" className="text-xs text-rose-600 font-medium">
+                <p id="identifier-error" className="text-xs text-coral-600 font-medium">
                   {fieldErrors.identifier}
                 </p>
               ) : (
-                <p id="identifier-hint" className="text-[11px] text-[#5E6B7D]">
+                <p id="identifier-hint" className="text-[11px] text-navy-500">
                   Students may sign in with their institutional email or EUID.
                 </p>
               )}
@@ -187,7 +188,7 @@ export const LoginPage: React.FC = () => {
             <div className="space-y-1.5">
               <label
                 htmlFor="password"
-                className="block text-xs font-semibold text-[#243247]"
+                className="block text-xs font-bold text-navy-900"
               >
                 Password
               </label>
@@ -207,23 +208,23 @@ export const LoginPage: React.FC = () => {
                   placeholder="Enter your password"
                   aria-invalid={!!fieldErrors.password}
                   aria-describedby={fieldErrors.password ? 'password-error' : undefined}
-                  className={`block w-full pl-3.5 pr-11 py-2.5 text-sm bg-white border rounded-lg text-[#243247] placeholder:text-[#5E6B7D] focus:outline-none focus:ring-2 transition-colors ${
+                  className={`block w-full pl-3.5 pr-11 py-2.5 text-sm bg-surface border rounded-xl text-navy-900 placeholder:text-navy-400 focus:outline-hidden focus:ring-2 transition-all ${
                     fieldErrors.password
-                      ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500/20'
-                      : 'border-[#D9DDE3] focus:border-[#2878D8] focus:ring-[#2878D8]/20'
+                      ? 'border-coral-300 focus:border-coral-500 focus:ring-coral-500/20'
+                      : 'border-warm-200 focus:border-brand-500 focus:ring-brand-500/20'
                   }`}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#5E6B7D] hover:text-[#243247] transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-navy-400 hover:text-navy-700 transition-colors"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
               {fieldErrors.password && (
-                <p id="password-error" className="text-xs text-rose-600 font-medium">
+                <p id="password-error" className="text-xs text-coral-600 font-medium">
                   {fieldErrors.password}
                 </p>
               )}
@@ -237,17 +238,22 @@ export const LoginPage: React.FC = () => {
                 size="md"
                 disabled={isLoading}
                 isLoading={isLoading}
-                className="w-full py-2.5 text-sm font-semibold justify-center bg-[#2878D8] hover:bg-[#2065B8] active:bg-[#18539C] text-white shadow-sm focus:ring-[#2878D8]"
+                className="w-full py-2.5 text-sm font-semibold justify-center"
               >
                 {isLoading ? 'Signing in...' : 'Sign In'}
               </Button>
             </div>
           </form>
-        </div>
+
+          <div className="pt-2 border-t border-warm-200 flex items-center justify-center gap-1.5 text-[11px] text-navy-500">
+            <ShieldCheck className="w-3.5 h-3.5 text-brand-600" />
+            <span>End-to-end encrypted authentication session</span>
+          </div>
+        </Card>
 
         {/* Help note */}
-        <p className="text-center text-xs text-[#5E6B7D]">
-          Need help? Contact your institution's examination coordinator.
+        <p className="text-center text-xs text-navy-500">
+          Need assistance? Contact your institution's examination coordinator.
         </p>
       </div>
     </div>
