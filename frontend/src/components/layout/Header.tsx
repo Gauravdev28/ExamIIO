@@ -9,12 +9,13 @@ import {
   ChevronDown,
   Award,
   Bell,
-  Search,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { Badge } from '../common/Badge';
-import { StatusIndicator } from '../common/StatusIndicator';
 import { ExamIIOLogo } from '../common/ExamIIOLogo';
+import { NotificationPanel } from '../notifications/NotificationPanel';
+import { AdminSendNotificationModal } from '../notifications/AdminSendNotificationModal';
+import { NotificationsAPI } from '../../api/notifications';
 
 export interface HeaderProps {
   onOpenMobileSidebar: () => void;
@@ -24,8 +25,36 @@ export interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  // Menus state
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [adminSendOpen, setAdminSendOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Load unread count on mount and polling interval (e.g. 60s)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchUnread = async () => {
+      try {
+        const count = await NotificationsAPI.getUnreadCount();
+        if (isMounted && typeof count === 'number') {
+          setUnreadCount(count);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 60000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const handleLogout = async () => {
     setAccountMenuOpen(false);
@@ -42,6 +71,18 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Close menus on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setAccountMenuOpen(false);
+        setNotificationOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const getRoleBadge = () => {
@@ -81,9 +122,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
   const profilePath = user?.role === 'ADMIN' ? '/admin/profile' : '/student/profile';
 
   return (
-    <header className="sticky top-0 z-20 h-16 bg-surface/95 backdrop-blur-md border-b border-warm-200 shadow-warm-xs">
+    <header className="sticky top-0 z-30 h-16 bg-[#FFFDF8] border-b border-warm-200 shadow-warm-xs">
       <div className="h-full px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
-        {/* Left: Mobile Drawer Toggle + Logo */}
+        {/* Left: Mobile Drawer Toggle + Logo + Role Context */}
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -98,53 +139,64 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
             <ExamIIOLogo variant="full" size="sm" />
           </div>
 
-          <div className="hidden lg:flex items-center gap-3">
+          <div className="hidden lg:flex items-center gap-2.5">
             {getRoleBadge()}
-            <StatusIndicator
-              status="online"
-              size="sm"
-              label="System Operational"
-              className="text-[11px] text-navy-500 font-medium"
-            />
-          </div>
-        </div>
-
-        {/* Center: Subtle Quick Context or Search info */}
-        <div className="hidden md:flex items-center flex-1 max-w-xs mx-4">
-          <div className="w-full relative">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-navy-400" />
-            <input
-              type="text"
-              readOnly
-              placeholder="ExamIIO Enterprise Examination"
-              className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs bg-canvas-subtle/70 border border-warm-200 text-navy-600 placeholder:text-navy-400 cursor-default select-none focus:outline-hidden"
-            />
           </div>
         </div>
 
         {/* Right: Notifications & User Profile Menu */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Notifications Placeholder / Icon */}
+          {/* Real Notification Control */}
           <div className="relative">
             <button
               type="button"
-              className="p-2 rounded-xl text-navy-500 hover:text-navy-900 hover:bg-warm-100 transition-colors relative"
+              onClick={() => {
+                setNotificationOpen(!notificationOpen);
+                setAccountMenuOpen(false);
+              }}
+              className={`p-2 rounded-xl transition-colors relative ${
+                notificationOpen
+                  ? 'bg-warm-200/80 text-navy-900'
+                  : 'text-navy-500 hover:text-navy-900 hover:bg-warm-100'
+              }`}
               aria-label="Notifications"
+              aria-expanded={notificationOpen}
+              aria-haspopup="dialog"
               title="Notifications"
             >
               <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-brand-500 ring-2 ring-surface" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-brand-600 text-white text-[10px] font-mono font-bold flex items-center justify-center ring-2 ring-surface">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
             </button>
+
+            {/* Opaque Notification Panel */}
+            <NotificationPanel
+              isOpen={notificationOpen}
+              onClose={() => setNotificationOpen(false)}
+              isAdmin={user?.role === 'ADMIN'}
+              onOpenAdminSend={() => setAdminSendOpen(true)}
+              unreadCount={unreadCount}
+              onUnreadCountChange={setUnreadCount}
+            />
           </div>
 
           {/* User Profile Dropdown */}
           <div className="relative" ref={menuRef}>
             <button
               type="button"
-              onClick={() => setAccountMenuOpen(!accountMenuOpen)}
-              className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-warm-100 transition-colors text-left group"
+              onClick={() => {
+                setAccountMenuOpen(!accountMenuOpen);
+                setNotificationOpen(false);
+              }}
+              className={`flex items-center gap-2 p-1.5 rounded-xl transition-colors text-left group ${
+                accountMenuOpen ? 'bg-warm-200/80' : 'hover:bg-warm-100'
+              }`}
               aria-expanded={accountMenuOpen}
               aria-haspopup="true"
+              aria-label="User account menu"
             >
               <div className="w-8 h-8 rounded-lg bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-700 font-bold text-xs font-mono shadow-warm-xs group-hover:scale-105 transition-transform">
                 {initials || 'U'}
@@ -160,21 +212,25 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
               <ChevronDown className={`w-3.5 h-3.5 text-navy-400 transition-transform duration-150 ${accountMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
-            {/* Dropdown Card */}
+            {/* Fully Opaque Solid Dropdown Card */}
             {accountMenuOpen && (
-              <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-surface border border-warm-200 shadow-warm-lg py-2 z-50 divide-y divide-warm-100 animate-scale-in">
+              <div
+                className="absolute right-0 top-full mt-2 w-64 sm:w-72 rounded-2xl bg-[#FFFDF8] border border-warm-200 shadow-warm-xl py-2 z-50 divide-y divide-warm-100 animate-scale-in text-navy-900"
+                role="menu"
+                aria-label="Account options"
+              >
                 {/* User Info Header */}
-                <div className="px-4 py-3">
+                <div className="px-4 py-3 bg-[#FCFAF4] rounded-t-xl">
                   <div className="text-xs font-bold text-navy-900 truncate">{displayName}</div>
                   <div className="text-[11px] text-navy-500 font-mono truncate mt-0.5">{user?.email}</div>
                   {user?.student_profile?.roll_number && (
-                    <div className="text-[10px] text-navy-500 font-mono mt-1">
-                      Roll: <span className="text-navy-800 font-bold">{user.student_profile.roll_number}</span>
+                    <div className="text-[10px] text-navy-600 font-mono mt-1">
+                      Roll: <span className="text-navy-900 font-bold">{user.student_profile.roll_number}</span>
                     </div>
                   )}
                   {user?.student_profile?.euid && (
-                    <div className="text-[10px] text-navy-500 font-mono">
-                      EUID: <span className="text-navy-800 font-bold">{user.student_profile.euid}</span>
+                    <div className="text-[10px] text-navy-600 font-mono">
+                      EUID: <span className="text-navy-900 font-bold">{user.student_profile.euid}</span>
                     </div>
                   )}
                 </div>
@@ -185,6 +241,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                     to={profilePath}
                     onClick={() => setAccountMenuOpen(false)}
                     className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-navy-700 hover:bg-warm-100 hover:text-navy-950 transition-colors"
+                    role="menuitem"
                   >
                     <User className="w-4 h-4 text-navy-400" />
                     <span>My Profile</span>
@@ -195,6 +252,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                       to="/admin/administrators"
                       onClick={() => setAccountMenuOpen(false)}
                       className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-navy-700 hover:bg-warm-100 hover:text-navy-950 transition-colors"
+                      role="menuitem"
                     >
                       <ShieldCheck className="w-4 h-4 text-violet-500" />
                       <span>Administrators</span>
@@ -207,6 +265,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                         to="/student/certificates"
                         onClick={() => setAccountMenuOpen(false)}
                         className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-navy-700 hover:bg-warm-100 hover:text-navy-950 transition-colors"
+                        role="menuitem"
                       >
                         <Award className="w-4 h-4 text-amber-500" />
                         <span>My Certificates</span>
@@ -215,6 +274,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                         to="/student/privacy"
                         onClick={() => setAccountMenuOpen(false)}
                         className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-navy-700 hover:bg-warm-100 hover:text-navy-950 transition-colors"
+                        role="menuitem"
                       >
                         <Shield className="w-4 h-4 text-blue-500" />
                         <span>Privacy &amp; Policy</span>
@@ -229,6 +289,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
                     type="button"
                     onClick={handleLogout}
                     className="w-full flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-coral-600 hover:bg-coral-50 transition-colors"
+                    role="menuitem"
                   >
                     <LogOut className="w-4 h-4" />
                     <span>Sign Out</span>
@@ -239,6 +300,19 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileSidebar }) => {
           </div>
         </div>
       </div>
+
+      {/* Admin Send Notification Modal */}
+      {user?.role === 'ADMIN' && (
+        <AdminSendNotificationModal
+          isOpen={adminSendOpen}
+          onClose={() => setAdminSendOpen(false)}
+          onSuccess={() => {
+            NotificationsAPI.getUnreadCount()
+              .then(setUnreadCount)
+              .catch(() => {});
+          }}
+        />
+      )}
     </header>
   );
 };
